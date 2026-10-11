@@ -9,6 +9,10 @@ retention pruning and fail-safe recording against the canonical
 Phase 2 — :class:`LessonExtractor`: distils those experiences into reusable
 :class:`Lesson` principles (via an :class:`~src.core.backend.LLMBackend`),
 merging similar ones and scoring confidence.
+
+Phase 3 — :class:`LessonStore` + :class:`LessonInjector`: rank the stored
+lessons against a task and fold the relevant ones into an agent's prompt
+(:func:`render_lessons`), closing the learn → apply loop.
 """
 
 from __future__ import annotations
@@ -22,6 +26,7 @@ from src.learning.experience_collector import (
     Outcome,
 )
 from src.learning.lesson import Lesson, LessonExtractor
+from src.learning.lesson_store import LessonInjector, LessonStore, render_lessons
 
 __all__ = [
     "DAY",
@@ -31,5 +36,8 @@ __all__ = [
     "ExperienceCollector",
     "Lesson",
     "LessonExtractor",
+    "LessonInjector",
+    "LessonStore",
     "Outcome",
+    "render_lessons",
 ]

@@ -73,6 +73,18 @@ bonus fuzz, chaos. Run: `python -m pytest tests/adversarial/ -v`.
   bad JSON/backend error/blank); confidence = base + min(.2,(n-1)*.05) − .25 if
   contradictory, clamped [0,1]; dedup by token Jaccard ≥ 0.6. Evidence =
   "task_id:step_id" (experiences have no id). Tests: `tests/test_learning_lesson.py`.
+- `src/learning/lesson_store.py` — Phase 3 `LessonStore` (thread-safe, in-memory
+  index; upsert by id; all/by_agent/by_tag/by_outcome/search/top; deterministic
+  `relevant()` = Jaccard(query, principle+context+tags) + 0.5·tag-hits +
+  0.3·role-match + 0.1·confidence, gated by min_confidence and a match; blank
+  query → confidence order; `build_context()` → prompt block; stats; JSON+JSONL
+  export/import) + `render_lessons()` (`- (conf) principle — context`) +
+  `LessonInjector(store, limit, min_confidence, tags).run(agent, task)`.
+  `BaseAgent.build_messages(task, context, *, lessons="")` + `run(..., lessons=)`
+  fold a `--- lessons ---` block into the USER turn (never the persona). run()
+  calls build_messages WITHOUT lessons then layers them on, so subclasses that
+  override build_messages with the old (task, context) signature keep working.
+  Tests: `tests/test_learning_lesson_store.py`.
 - `src/memory/` — persistent memory, plain SQLite, no deps (6 phases done):
   base.py (connect/MemoryRecord/MemoryStore+RLock/Clock), embeddings.py
   (HashingEmbedder/cosine), episodic.py, semantic.py (optional injectable
@@ -132,6 +144,14 @@ bonus fuzz, chaos. Run: `python -m pytest tests/adversarial/ -v`.
   tolerant JSON parsing, deterministic confidence scoring, similarity dedup.
   LLMBackend.generate(messages: Sequence[Message], *, model=None) -> str is the
   contract (stubbed offline in tests). 869 tests, ~98.8% cov.
+- 2026-10-11: learning Phase 3 — `LessonStore` + `LessonInjector` close the loop:
+  relevant lessons are ranked (deterministic score) and folded into the agent
+  USER turn via the new optional `lessons=` on `build_messages`/`run`. Injection
+  is opt-in and byte-for-byte backward compatible (no lessons → identical
+  prompt). LESSON: keep `run()` calling `build_messages(task, context)` without
+  lessons and layer the block on afterwards — passing `lessons=` broke a
+  subclass that overrides build_messages with the old signature. 899 tests,
+  98.88% cov.
 - Lesson: pytest `python_classes=Test*` collects agent class `TesterAgent`/alias
   `Tester` → PytestCollectionWarning. Never import `TesterAgent` under a
   Test-prefixed name in tests; use `AGENT_CLASSES` or alias it (e.g. `as QA`).

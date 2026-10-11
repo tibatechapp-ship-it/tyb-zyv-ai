@@ -6,9 +6,10 @@ data layer; later phases add the learning itself.
 
 ```
 src/learning/
-├── __init__.py             # Experience, Outcome, ExperienceCollector, Lesson, LessonExtractor, KNOWN_*
+├── __init__.py             # Experience, Outcome, ExperienceCollector, Lesson, LessonExtractor, LessonStore, LessonInjector, KNOWN_*
 ├── experience_collector.py # the in-memory buffer, queries, stats, IO, pruning
-└── lesson.py               # Lesson + LessonExtractor (Phase 2)
+├── lesson.py               # Lesson + LessonExtractor (Phase 2)
+└── lesson_store.py         # LessonStore + LessonInjector + render_lessons (Phase 3)
 ```
 
 ## Experience — one recorded action
@@ -177,5 +178,70 @@ union of evidence and tags, the most common agent/outcome, the latest
   (`extract_from_failure` / `extract_from_success` / `extract_batch` /
   `extract_from_task`), tolerant JSON parsing, confidence scoring,
   similarity-based deduplication.
-- **Phase 3** — feed the learned lessons back into agent decisions
-  (prompt injection / a lesson store).
+- **Phase 3 (done)** — `LessonStore` + `LessonInjector`: rank the stored lessons
+  against a task and fold the relevant ones into an agent's prompt, closing the
+  learn → apply loop (see below).
+
+## Using lessons (Phase 3) — closing the loop
+
+Phase 2 produces lessons; Phase 3 *spends* them. A `LessonStore` holds the
+lessons, ranks the relevant ones for a task, and renders them into a prompt
+block that any agent will accept.
+
+```python
+from src.learning import LessonStore, LessonInjector, render_lessons
+
+store = LessonStore()
+store.add_many(extractor.extract_from_task("task-42"))   # from Phase 2
+
+# get the lessons relevant to this task (token overlap + agent-role bonus)
+block = store.build_context("deploy the auth service", agent_role="coder")
+# -> "- (0.80) When deploying at night, always run the test suite first — ..."
+
+# the agent folds it into the USER turn (never the persona)
+result = agent.run("deploy the auth service", lessons=block)
+```
+
+Because agents are stateless, wiring is opt-in: an agent told nothing behaves
+exactly as before. `LessonInjector` automates the wiring for you:
+
+```python
+injector = LessonInjector(store, limit=5, min_confidence=0.4)
+result = injector.run(agent, "deploy the auth service")   # context + lessons injected
+```
+
+### How relevance is scored
+
+Deterministic, so equal inputs rank equally:
+
+```
+score = Jaccard(query, lesson)          # token overlap (principle + context + tags)
+      + 0.5  · (matching requested tags)
+      + 0.3  if lesson.agent_role == agent_role
+      + 0.1  · lesson.confidence
+```
+
+A lesson is a candidate only when it clears `min_confidence` **and** overlaps the
+query, shares a requested tag, or matches the agent role — so an unrelated task
+injects nothing. A blank `query` has no tokens to match, so `min_confidence` /
+role / tag alone decide the order (handy for "always show high-confidence
+lessons").
+
+### Store API
+
+```python
+store.add(lesson) / add_many([...])         # upsert by id; preserves position
+store.get(id) / remove(id) / clear()
+store.all(limit=None)                        # newest first (created_at)
+store.by_agent(role) / by_tag(tag) / by_outcome(outcome) / search(pred)
+store.top(n=10)                              # most confident (ties: newest)
+store.relevant(query, agent_role=..., tags=[...], limit=5, min_confidence=0.0)
+store.build_context(query, ...)              # -> prompt block (str, "" if none)
+store.stats()                                # totals + avg_confidence + counters
+store.export(path) / import_from(path)       # JSON   (+ jsonl variants)
+```
+
+`render_lessons(lessons)` is the pure formatter behind `build_context`
+(`- (confidence) principle — context`), usable on its own. The store is
+thread-safe (RLock) and, like the collector, deliberately in-memory — durable
+history stays in `src.memory`.

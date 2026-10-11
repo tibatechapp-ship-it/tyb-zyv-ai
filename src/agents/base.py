@@ -48,21 +48,43 @@ class BaseAgent(ABC):
         self.metrics = AgentMetrics()
 
     # -- prompt construction ----------------------------------------------
-    def build_messages(self, task: str, context: str = "") -> list[Message]:
-        """Build the conversation sent to the backend for ``task``."""
-        user = task if not context else f"{task}\n\n--- context ---\n{context}"
-        return [
+    def build_messages(
+        self, task: str, context: str = "", *, lessons: str = ""
+    ) -> list[Message]:
+        """Build the conversation sent to the backend for ``task``.
+
+        ``context`` and ``lessons`` are folded into the **user** turn (never the
+        persona), each behind a labelled header. With both empty the user turn is
+        exactly ``task`` — existing callers are unaffected.
+        """
+        user = task
+        if context:
+            user = f"{user}\n\n--- context ---\n{context}"
+        messages = [
             Message("system", self.system_prompt),
             Message("user", user),
         ]
+        return self._with_lessons(messages, lessons)
+
+    @staticmethod
+    def _with_lessons(messages: list[Message], lessons: str) -> list[Message]:
+        """Append a ``--- lessons ---`` block to the final (user) turn."""
+        if not lessons or not messages:
+            return messages
+        last = messages[-1]
+        messages[-1] = Message(last.role, f"{last.content}\n\n--- lessons ---\n{lessons}")
+        return messages
 
     # -- execution ---------------------------------------------------------
-    def run(self, task: str, *, context: str = "") -> AgentResult:
+    def run(self, task: str, *, context: str = "", lessons: str = "") -> AgentResult:
         """Execute ``task`` and return a structured result (never raises)."""
         self.state.mark_busy(task)
         started = time.perf_counter()
         try:
-            messages = self.build_messages(task, context)
+            # Critically: call build_messages(task, context) *without* lessons so
+            # subclasses that override it with the older signature keep working;
+            # the lessons block is layered on here instead.
+            messages = self._with_lessons(self.build_messages(task, context), lessons)
             output = self.backend.generate(messages, model=self.model)
             # A backend that violates the str contract (Byzantine failure) must
             # fail loudly here, not smuggle a non-str into AgentResult.output.
