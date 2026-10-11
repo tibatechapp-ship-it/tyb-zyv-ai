@@ -6,12 +6,26 @@ real clock involved — each test patches the exact seam the code touches.
 
 ```
 tests/
-├── conftest.py            # importlib module loader + fakes (FakePopen/FakeResponse)
-├── test_zyvo_telegram.py  # unit tests for the Telegram bot
-└── test_zyvo_voice.py     # unit tests for the voice assistant
+├── conftest.py                 # importlib module loader + fakes (FakePopen/FakeResponse)
+├── deep_helpers.py             # mock LLM backends for the deep agent suites
+├── test_zyvo_telegram.py       # unit tests for the Telegram bot
+├── test_zyvo_voice.py          # unit tests for the voice assistant
+├── test_src_core.py            # types, backend, zyvo client, resilience, watchdog
+├── test_src_agents.py          # BaseAgent, registry, state, metrics, communication
+├── test_src_patterns.py        # supervisor, pipeline, fanout, delegation, blackboard
+├── test_src_tui.py             # Textual app / screens / widgets
+├── test_agents_20.py           # the 20 built-in agents' contract
+├── test_phase1_context.py      # deep: personas, bilingual contract, context handling
+├── test_phase2_collab.py       # deep: multi-agent collaboration patterns
+├── test_phase3_resilience.py   # deep: retries, fallback, queue, watchdog
+├── test_phase4_security.py     # deep: injection/traversal inert, secrets, permissions
+├── test_phase5_performance.py  # deep: load (100 tasks), memory, latency, benchmarks
+├── test_snapshot_contract.py   # golden catalog of the 20-agent public contract
+└── __snapshots__/              # syrupy golden files
 ```
 
-As of the last run: **172 tests, 100 % coverage** (branch coverage).
+As of the last run: **505 tests, 98 % coverage** (branch coverage; the
+`src/agents/` layer sits at 100 %).
 
 ---
 
@@ -19,7 +33,7 @@ As of the last run: **172 tests, 100 % coverage** (branch coverage).
 
 ```bash
 # 1. install the test tooling (pure-Python, works on Termux)
-pip install pytest pytest-cov
+pip install -e ".[dev]"
 
 # 2. run everything
 pytest
@@ -27,6 +41,9 @@ pytest
 # 3. with coverage
 pytest --cov --cov-report=term-missing
 ```
+
+The dev extra installs `pytest-asyncio` (async deep tests), `pytest-benchmark`
+(the Phase-5 micro-benchmarks), and `syrupy` (golden-contract snapshots).
 
 `pytest` picks up its configuration from `pyproject.toml`
 (`[tool.pytest.ini_options]` and `[tool.coverage.*]`), so no flags are required.
@@ -93,6 +110,26 @@ outside world:
 
 ---
 
+## Deep agent-framework suites (Phases 1–5)
+
+Beyond unit coverage, five integration-level suites drive the **20 real agents**
+and every pattern through a mock LLM backend (`deep_helpers.py`), so they need
+no server, network or real model:
+
+| Phase | File | Proves |
+|-------|------|--------|
+| 1 — Context | `test_phase1_context.py` | Bilingual persona contract per agent; the context block is fused into the *user* turn byte-for-byte (never the system prompt); multi-turn isolation + error recovery. |
+| 2 — Collaboration | `test_phase2_collab.py` | Pipeline chaining with early stop, true-parallel fan-out, supervisor aggregation, delegation hand-off, blackboard, the communication bus, and a full 20-agent run. |
+| 3 — Resilience | `test_phase3_resilience.py` | Retry recovery with bounded attempts, interruptible hangs, on-disk command-queue capture + cross-instance replay, model fallback chain, bounded watchdog/heartbeat loops. |
+| 4 — Security | `test_phase4_security.py` | Path traversal and command injection are **inert** (hostile text is never executed), no hardcoded secrets, and the permission model is consistent (every permission backed by a declared tool; read-only agents can't write/shell out). |
+| 5 — Performance | `test_phase5_performance.py` | 100 tasks sequential + 100 concurrent (asyncio), bounded memory over 100 runs, low single-run latency, minimum throughput, plus `pytest-benchmark` micro-benchmarks. |
+
+A golden-contract snapshot (`test_snapshot_contract.py`, syrupy) pins the whole
+20-agent public contract so an accidental rename/dropped-tool/widened-permission
+change shows up as a reviewable diff.
+
+---
+
 ## CI
 
 | Workflow | What it does |
@@ -113,6 +150,6 @@ with `[skip ci]`. The README badge points at that file via
 - **Every function gets at least one test.** New public functions should come
   with a test in the same file.
 - **Patch, don't hit.** No test may perform real I/O, network, or sleep.
-- **Keep coverage ≥ 80 %.** `pytest --cov` fails nobody by default, but the
-  badge and PRs should stay green.
+- **Keep coverage ≥ 95 %.** `[tool.coverage.report]` sets `fail_under = 95`, so
+  `pytest --cov` fails the build if overall coverage drops below the bar.
 - **Type-annotate everything** in `tests/` too (the repo targets Python 3.11+).

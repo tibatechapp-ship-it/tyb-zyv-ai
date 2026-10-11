@@ -1,6 +1,6 @@
 [project]
 name = "tyb-zyv-ai"
-version = "2.1.0"
+version = "2.2.0"
 description = "AI-powered assistants for Termux"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -28,7 +28,16 @@ classifiers = [
 voice = ["gTTS>=2.5.0", "SpeechRecognition>=3.10.0"]
 # The 20-agent framework + interactive TUI (src/).
 tui = ["textual>=0.80"]
-dev = ["pytest>=7", "pytest-cov", "pytest-textual-snapshot", "textual>=0.80"]
+dev = [
+    "pytest>=7",
+    "pytest-cov",
+    "pytest-textual-snapshot",
+    "textual>=0.80",
+    "pytest-asyncio>=0.24",
+    "pytest-benchmark>=4",
+    "hypothesis>=6",
+    "syrupy>=4",
+]
 
 # ─── Linting (ruff) ─────────────────────────────────────────────────────────
 [tool.ruff]
@@ -61,6 +70,9 @@ testpaths = ["tests"]
 # The src/ package is imported as `src.*` from the repository root.
 pythonpath = ["."]
 addopts = "-ra --strict-markers --strict-config"
+# The deep test-suite (phases 1–5) mixes sync and async tests.
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 
 # --------------------------------------------------------------------------- #
 # coverage
@@ -73,6 +85,8 @@ omit = ["tests/*", "scripts/*"]
 [tool.coverage.report]
 show_missing = true
 skip_empty = true
+# The deep security/performance suites must keep overall coverage this high.
+fail_under = 95
 exclude_lines = [
     "pragma: no cover",
     "if __name__ == .__main__.:",

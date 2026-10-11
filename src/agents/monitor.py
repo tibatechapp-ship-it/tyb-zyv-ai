@@ -25,5 +25,5 @@ class MonitorAgent(BaseAgent):
         "timestamps and values, never hunches, and distinguish a real\n"
         "outage from a harmless blip."
     )
-    tools = ("observe", "metrics", "alerts")
+    tools = ("read", "observe", "metrics", "alerts")
     permissions = frozenset({"read"})

@@ -230,8 +230,8 @@ zyvo-voice --text "git status in ~/myapp" --no-speak
 Issues and pull requests are welcome.
 1. Fork the repo and create a feature branch.
 2. Keep every function type-annotated (the CI enforces `ruff` + `mypy`).
-3. Run the tests — `pip install pytest pytest-cov && pytest --cov` — and keep
-   coverage at or above 80%.
+3. Run the tests — `pip install -e ".[dev]" && pytest --cov` — and keep
+   coverage at or above 95%.
 4. Open a pull request describing the change.
 
 See [`docs/TESTING.md`](docs/TESTING.md) for the full test/coverage workflow.

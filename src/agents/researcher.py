@@ -25,5 +25,5 @@ class ResearcherAgent(BaseAgent):
         "them. Triangulate with at least two independent sources before\n"
         "treating something as fact, and say explicitly what is unverified."
     )
-    tools = ("search", "web")
+    tools = ("read", "search", "web")
     permissions = frozenset({"read"})

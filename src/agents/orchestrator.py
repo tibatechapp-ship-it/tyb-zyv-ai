@@ -25,5 +25,5 @@ class OrchestratorAgent(BaseAgent):
         "and make sure everyone works on the current problem rather than a\n"
         "plan that has already changed."
     )
-    tools = ("delegate", "communicate")
+    tools = ("read", "write", "bash", "delegate", "communicate")
     permissions = frozenset({"read", "write", "bash", "delegate"})

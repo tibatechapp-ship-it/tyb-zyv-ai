@@ -1,0 +1,280 @@
+# serializer version: 1
+# name: test_agent_catalog_matches_the_golden_snapshot
+  '''
+  [
+    {
+      "name": "analyst",
+      "group": "planning",
+      "tools": [
+        "read",
+        "search"
+      ],
+      "permissions": [
+        "read"
+      ],
+      "has_persona": true
+    },
+    {
+      "name": "architect",
+      "group": "core",
+      "tools": [
+        "files",
+        "read",
+        "search",
+        "write"
+      ],
+      "permissions": [
+        "read",
+        "write"
+      ],
+      "has_persona": true
+    },
+    {
+      "name": "coder",
+      "group": "core",
+      "tools": [
+        "bash",
+        "edit",
+        "read",
+        "write"
+      ],
+      "permissions": [
+        "bash",
+        "read",
+        "write"
+      ],
+      "has_persona": true
+    },
+    {
+      "name": "compliance",
+      "group": "quality",
+      "tools": [
+        "read",
+        "search"
+      ],
+      "permissions": [
+        "read"
+      ],
+      "has_persona": true
+    },
+    {
+      "name": "debugger",
+      "group": "core",
+      "tools": [
+        "bash",
+        "logs",
+        "read"
+      ],
+      "permissions": [
+        "bash",
+        "read"
+      ],
+      "has_persona": true
+    },
+    {
+      "name": "designer",
+      "group": "planning",
+      "tools": [
+        "design",
+        "read",
+        "write"
+      ],
+      "permissions": [
+        "read",
+        "write"
+      ],
+      "has_persona": true
+    },
+    {
+      "name": "devops",
+      "group": "ops",
+      "tools": [
+        "bash",
+        "deploy",
+        "read"
+      ],
+      "permissions": [
+        "bash",
+        "deploy",
+        "read"
+      ],
+      "has_persona": true
+    },
+    {
+      "name": "documentation",
+      "group": "quality",
+      "tools": [
+        "read",
+        "write"
+      ],
+      "permissions": [
+        "read",
+        "write"
+      ],
+      "has_persona": true
+    },
+    {
+      "name": "estimator",
+      "group": "planning",
+      "tools": [
+        "math",
+        "read"
+      ],
+      "permissions": [
+        "read"
+      ],
+      "has_persona": true
+    },
+    {
+      "name": "monitor",
+      "group": "ops",
+      "tools": [
+        "alerts",
+        "metrics",
+        "observe",
+        "read"
+      ],
+      "permissions": [
+        "read"
+      ],
+      "has_persona": true
+    },
+    {
+      "name": "orchestrator",
+      "group": "ops",
+      "tools": [
+        "bash",
+        "communicate",
+        "delegate",
+        "read",
+        "write"
+      ],
+      "permissions": [
+        "bash",
+        "delegate",
+        "read",
+        "write"
+      ],
+      "has_persona": true
+    },
+    {
+      "name": "performance",
+      "group": "quality",
+      "tools": [
+        "bash",
+        "profile",
+        "read"
+      ],
+      "permissions": [
+        "bash",
+        "read"
+      ],
+      "has_persona": true
+    },
+    {
+      "name": "planner",
+      "group": "planning",
+      "tools": [
+        "brainstorm",
+        "read"
+      ],
+      "permissions": [
+        "read"
+      ],
+      "has_persona": true
+    },
+    {
+      "name": "recovery",
+      "group": "ops",
+      "tools": [
+        "bash",
+        "read",
+        "restart"
+      ],
+      "permissions": [
+        "bash",
+        "read"
+      ],
+      "has_persona": true
+    },
+    {
+      "name": "refactor",
+      "group": "quality",
+      "tools": [
+        "bash",
+        "read",
+        "write"
+      ],
+      "permissions": [
+        "bash",
+        "read",
+        "write"
+      ],
+      "has_persona": true
+    },
+    {
+      "name": "reporter",
+      "group": "ops",
+      "tools": [
+        "read",
+        "write"
+      ],
+      "permissions": [
+        "write"
+      ],
+      "has_persona": true
+    },
+    {
+      "name": "researcher",
+      "group": "planning",
+      "tools": [
+        "read",
+        "search",
+        "web"
+      ],
+      "permissions": [
+        "read"
+      ],
+      "has_persona": true
+    },
+    {
+      "name": "reviewer",
+      "group": "core",
+      "tools": [
+        "read",
+        "search"
+      ],
+      "permissions": [
+        "read"
+      ],
+      "has_persona": true
+    },
+    {
+      "name": "security_auditor",
+      "group": "quality",
+      "tools": [
+        "read",
+        "scan",
+        "search"
+      ],
+      "permissions": [
+        "read"
+      ],
+      "has_persona": true
+    },
+    {
+      "name": "tester",
+      "group": "core",
+      "tools": [
+        "bash",
+        "read"
+      ],
+      "permissions": [
+        "bash",
+        "read"
+      ],
+      "has_persona": true
+    }
+  ]
+  '''
+# ---

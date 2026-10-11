@@ -25,5 +25,5 @@ class ArchitectAgent(BaseAgent):
         "data flow, interfaces and trade-offs. Prefer boring, simple designs;\n"
         "justify every decision in one line and call out risks explicitly."
     )
-    tools = ("read", "files", "search")
+    tools = ("read", "write", "files", "search")
     permissions = frozenset({"read", "write"})
