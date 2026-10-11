@@ -45,6 +45,14 @@ leaves your device except what you explicitly ask the model to do.
 - **Configurable.** `--chat` (no execution), `--no-mic`, `--no-speak`, `--no-report`, `--text "…"`, `--new`.
 - **RTL-aware output.** Optional `rtl` helper re-shapes Arabic for terminals that render it left-to-right.
 
+### `src/core` — reliability layer for the server
+- **Backoff retries.** Five attempts with 5s → 10s → 20s → 40s delays (`RetryPolicy`).
+- **Model fallback.** If the primary model fails, each alternate is tried in turn (`FallbackBackend`).
+- **Caching & rate limiting.** One-hour reply cache (`ResponseCache`) and a sliding-window request cap (`RateLimiter`).
+- **Offline queue.** Requests captured while the server is down are stored on disk and replayed later (`CommandQueue`).
+- **Structured logging.** One JSON object per line, rotating daily (`logging_utils`).
+- **Watchdog + heartbeat.** Restarts the service when it dies and pings Telegram every five minutes (`Watchdog`/`Heartbeat`, `scripts/health_monitor.py`).
+
 ---
 
 ## Requirements
@@ -154,6 +162,7 @@ zyvo-voice --text "git status in ~/myapp" --no-speak
 | [`docs/INSTALLATION.md`](docs/INSTALLATION.md) | Every package, app, token and permission needed — start to finish. |
 | [`docs/USAGE.md`](docs/USAGE.md) | All CLI flags, control words, env vars, and recipes. |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | How the pieces fit: PTY server, SSE stream, permission watchdog, retries. |
+| [`docs/SERVER_RELIABILITY.md`](docs/SERVER_RELIABILITY.md) | The `src/core` resilience layer: retries, cache, queue, fallback, JSON logging, watchdog + heartbeat. |
 | [`docs/TESTING.md`](docs/TESTING.md) | Running the test suite, coverage, fakes, and how CI is wired. |
 | [`docs/FAQ.md`](docs/FAQ.md) | "Service not found", no audio, mic not working, TTS language, and more. |
 

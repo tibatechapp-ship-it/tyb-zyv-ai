@@ -1,14 +1,14 @@
-#!/usr/bin/env python3
 """Fail if any function in the assistant scripts is missing type hints.
 
 This repo's standard is Python 3.11+ with *every* function fully annotated
 (arguments and return). The CI runs this script on each push.
 
 Usage:
-    python scripts/check_annotations.py [file ...]
+    python scripts/check_annotations.py [path ...]
 
-Exit code 0 and a success line when everything is annotated, otherwise it
-prints each offender as ``file:line name: missing ...`` and exits 1.
+Each argument may be a file or a directory; directories are searched
+recursively for ``*.py`` files. With no arguments the two assistant scripts and
+the whole ``src/`` package are checked.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ import ast
 import sys
 from pathlib import Path
 
-DEFAULT_FILES: tuple[str, ...] = ("zyvo-telegram.py", "zyvo-voice.py")
+DEFAULT_FILES: tuple[str, ...] = ("zyvo-telegram.py", "zyvo-voice.py", "src")
 SKIP_ARGS: frozenset[str] = frozenset({"self", "cls"})
 
 
@@ -52,9 +52,20 @@ def check_file(path: Path) -> list[str]:
     return problems
 
 
+def expand(paths: list[Path]) -> list[Path]:
+    """Expand directories into their ``*.py`` files (recursively)."""
+    files: list[Path] = []
+    for path in paths:
+        if path.is_dir():
+            files.extend(sorted(p for p in path.rglob("*.py") if p.is_file()))
+        else:
+            files.append(path)
+    return files
+
+
 def main(argv: list[str]) -> int:
     """Entry point: check every file and report."""
-    files = [Path(p) for p in (argv[1:] or DEFAULT_FILES)]
+    files = expand([Path(p) for p in (argv[1:] or DEFAULT_FILES)])
     all_problems: list[str] = []
     for path in files:
         all_problems.extend(check_file(path))
@@ -64,7 +75,7 @@ def main(argv: list[str]) -> int:
         print(f"\nFAIL: {len(all_problems)} function(s) not fully type-annotated.")
         return 1
 
-    print(f"OK: all functions fully type-annotated in {', '.join(str(f) for f in files)}.")
+    print(f"OK: all functions fully type-annotated in {len(files)} file(s).")
     return 0
 
 
