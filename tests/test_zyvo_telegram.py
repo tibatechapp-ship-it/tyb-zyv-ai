@@ -690,3 +690,639 @@ def test_main_full_path_wires_threads(tg, monkeypatch):
     monkeypatch.setattr(tg.sys, "argv", ["zyvo-telegram"])
     tg.main()
     assert "poll" in started
+
+
+# --------------------------------------------------------------------------- #
+# Extra edge paths (coverage hardening)
+# --------------------------------------------------------------------------- #
+class _OneShotQueue:
+    """A WORKQ stand-in that yields one item then raises to stop the loop."""
+
+    def __init__(self, items):
+        self.items = list(items)
+
+    def get(self):
+        if self.items:
+            return self.items.pop(0)
+        raise KeyboardInterrupt
+
+    def task_done(self):
+        pass
+
+    def qsize(self):
+        return len(self.items)
+
+    def put(self, item):
+        self.items.append(item)
+
+
+def test_tg_upload_prints_on_error(tg, tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(tg, "_request", lambda *a, **k: {"ok": False})
+    p = tmp_path / "f.bin"
+    p.write_bytes(b"x")
+    tg.tg_upload("sendPhoto", {}, "photo", str(p), "image/png")
+    assert "upload error" in capsys.readouterr().out
+
+
+def test_send_voice_no_caption_and_photo_with_caption(tg, monkeypatch):
+    seen = []
+    monkeypatch.setattr(tg, "tg_upload",
+                        lambda m, f, ff, p, c: seen.append((m, dict(f))) or {"ok": True})
+    tg.send_voice("1", "/tmp/x.ogg")                 # no caption -> 162->164
+    tg.send_photo("1", "/tmp/x.png", caption="hi")   # caption   -> 169-170
+    assert seen[0][0] == "sendVoice" and "caption" not in seen[0][1]
+    assert seen[1][0] == "sendPhoto" and seen[1][1]["caption"] == "hi"
+
+
+def test_kill_tree_fallback_when_getpgid_fails(tg, monkeypatch):
+    monkeypatch.setattr(tg.os, "getpgid",
+                        lambda pid: (_ for _ in ()).throw(ProcessLookupError()))
+    monkeypatch.setattr(tg.time, "sleep", lambda s: None)
+
+    class Zombie:
+        pid = 9
+
+        def poll(self):
+            return None
+
+        def terminate(self):
+            raise RuntimeError("cannot terminate")
+
+    tg.kill_tree(Zombie())                           # type: ignore[arg-type]
+
+
+def test_kill_tree_returns_when_proc_already_dead(tg, monkeypatch):
+    monkeypatch.setattr(tg.os, "getpgid", lambda pid: pid)
+    monkeypatch.setattr(tg.os, "killpg", lambda pg, sig: None)
+    monkeypatch.setattr(tg.time, "sleep", lambda s: None)
+
+    class Dead:
+        pid = 9
+
+        def poll(self):
+            return 0
+
+    tg.kill_tree(Dead())                             # type: ignore[arg-type]
+
+
+def test_start_server_waits_until_ready(tg, tmp_path, monkeypatch):
+    monkeypatch.setattr(shutil, "which", lambda n: "/usr/bin/" + n)
+    monkeypatch.setattr(tg, "LOG_SERVER", str(tmp_path / "srv.log"))
+    monkeypatch.setattr(tg.subprocess, "Popen", FakePopen)
+    state = {"n": 0}
+
+    def server_up():
+        state["n"] += 1
+        return state["n"] >= 2
+
+    monkeypatch.setattr(tg, "server_up", server_up)
+    monkeypatch.setattr(tg.time, "sleep", lambda s: None)
+    proc = tg.start_server()
+    assert proc is FakePopen.last
+
+
+def test_ensure_server_waits_for_existing_proc(tg, monkeypatch):
+    monkeypatch.setattr(tg, "server_up", lambda: False)
+    killed = []
+    monkeypatch.setattr(tg, "kill_tree", lambda p: killed.append(p))
+    monkeypatch.setattr(tg.time, "sleep", lambda s: None)
+
+    class Live:
+        def poll(self):
+            return None
+
+    live = Live()
+    tg._PROC = live
+    monkeypatch.setattr(tg, "start_server", lambda: "NEW")
+    assert tg.ensure_server() == "NEW"
+    assert killed == [live]
+
+
+def test_ensure_server_wait_loop_finds_server(tg, monkeypatch):
+    calls = {"n": 0}
+
+    def server_up():
+        calls["n"] += 1
+        return calls["n"] >= 2                       # False at top, True in wait
+
+    monkeypatch.setattr(tg, "server_up", server_up)
+    monkeypatch.setattr(tg.time, "sleep", lambda s: None)
+
+    class Live:
+        def poll(self):
+            return None
+
+    live = Live()
+    tg._PROC = live
+    assert tg.ensure_server() is live
+
+
+def test_get_session_creates_when_state_empty(tg, tmp_path, monkeypatch):
+    state = tmp_path / "sess"
+    state.write_text("", encoding="utf-8")
+    monkeypatch.setattr(tg, "STATE_FILE", str(state))
+    monkeypatch.setattr(tg, "STATE_DIR", str(tmp_path))
+    monkeypatch.setattr(tg, "api", lambda *a, **k: {"id": "NEW"})
+    assert tg.get_session() == "NEW"
+
+
+def test_get_session_creates_when_api_response_falsy(tg, tmp_path, monkeypatch):
+    state = tmp_path / "sess"
+    state.write_text("OLD", encoding="utf-8")
+    monkeypatch.setattr(tg, "STATE_FILE", str(state))
+    monkeypatch.setattr(tg, "STATE_DIR", str(tmp_path))
+
+    def api(method, path, *a, **k):
+        if method == "GET":
+            return None
+        return {"id": "NEW2"}
+
+    monkeypatch.setattr(tg, "api", api)
+    assert tg.get_session() == "NEW2"
+
+
+def test_sse_listener_parses_many_line_shapes(tg, monkeypatch):
+    lines = [
+        b"\n",                                                     # not data:
+        b"data: \n",                                               # empty payload
+        b"data: not-json\n",                                       # bad json
+        b'data: {"type":"other"}\n',                               # wrong type
+        b'data: {"type":"message.part.updated","properties":'
+        b'{"part":{"type":"tool"}}}\n',                            # tool w/o id
+        b'data: {"type":"message.part.updated","properties":'
+        b'{"part":{"type":"tool","id":"P2","tool":"read"}}}\n',    # good
+    ]
+
+    class Stream(FakeResponse):
+        def __init__(self):
+            super().__init__(body=b"")
+            self.status = 200
+
+        def __iter__(self):
+            return iter(lines)
+
+    calls = {"n": 0}
+
+    def urlopen(*a, **k):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return Stream()
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(tg.urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(tg.time, "sleep", lambda s: None)
+    with pytest.raises(KeyboardInterrupt):
+        tg.sse_listener()
+    assert "P2" in tg.PARTS and tg.PARTS["P2"]["tool"] == "read"
+
+
+def test_sse_listener_reconnects_after_error(tg, monkeypatch, capsys):
+    monkeypatch.setattr(tg.urllib.request, "urlopen",
+                        lambda *a, **k: (_ for _ in ()).throw(OSError("refused")))
+    monkeypatch.setattr(tg.time, "sleep",
+                        lambda s: (_ for _ in ()).throw(KeyboardInterrupt))
+    with pytest.raises(KeyboardInterrupt):
+        tg.sse_listener()
+    assert "reconnect" in capsys.readouterr().out
+
+
+def test_watchdog_stop_flag_and_immediate_return(tg):
+    wd = tg.PermissionWatchdog()
+    assert wd._stop is False
+    wd.stop()
+    assert wd._stop is True
+    wd.run()                                        # returns at once, no sleep
+
+
+def test_watchdog_skips_when_no_sid(tg, monkeypatch):
+    monkeypatch.setattr(tg, "CURRENT_SID", None)
+    monkeypatch.setattr(tg.time, "sleep",
+                        lambda s: (_ for _ in ()).throw(KeyboardInterrupt))
+    wd = tg.PermissionWatchdog()
+    with pytest.raises(KeyboardInterrupt):
+        wd.run()
+
+
+def test_watchdog_handles_nonlist_missing_rid_and_post_fallback(tg, monkeypatch):
+    monkeypatch.setattr(tg, "CURRENT_SID", "S")
+    posted = []
+
+    def api(method, path, body=None, *a, **k):
+        if method == "GET":
+            if path.endswith("/permission") and path == "/session/S/permission":
+                return [{"id": "1"}, {}]            # 2nd item has no rid
+            return "not-a-list"                     # non-list branch
+        posted.append(path)
+        if path.startswith("/session/S/permission/1/reply"):
+            raise RuntimeError("bad")               # first reply path fails
+        return {}
+
+    monkeypatch.setattr(tg, "api", api)
+    monkeypatch.setattr(tg.time, "sleep",
+                        lambda s: (_ for _ in ()).throw(KeyboardInterrupt))
+    wd = tg.PermissionWatchdog()
+    with pytest.raises(KeyboardInterrupt):
+        wd.run()
+    assert any(p.endswith("/permission/1/reply") for p in posted)
+
+
+def test_collect_turn_tools_skips_other_sessions(tg):
+    tg.PARTS.clear()
+    tg.PARTS["a"] = {"id": "a", "tool": "read", "sessionID": "side"}
+    tg.PARTS["b"] = {"id": "b", "tool": "bash", "sessionID": "sid"}
+    out = tg.collect_turn_tools("sid", set())
+    assert [p["id"] for p in out] == ["b"]
+
+
+def test_parse_tools_file_tool_without_path(tg):
+    actions, created, modified = tg.parse_tools([
+        {"tool": "edit", "state": {"input": {}, "status": "completed",
+                                   "metadata": {}}},
+    ])
+    assert created == [] and modified == []
+    assert len(actions) == 1
+
+
+def test_run_turn_uses_long_sleep_when_server_missing(tg, monkeypatch):
+    sleeps = []
+    state = {"n": 0}
+
+    def api(*a, **k):
+        state["n"] += 1
+        if state["n"] == 1:
+            raise OSError("down")
+        return {"parts": [{"type": "text", "text": "ok"}]}
+
+    monkeypatch.setattr(tg, "api", api)
+    monkeypatch.setattr(tg, "ensure_server", lambda: None)
+    monkeypatch.setattr(tg.time, "sleep", lambda s: sleeps.append(s))
+    monkeypatch.setattr(tg, "collect_turn_tools", lambda sid, pre: [])
+    reply, _ = tg.run_turn("S", "hi")
+    assert reply == "ok"
+    assert 3 in sleeps
+
+
+def test_run_turn_exhausts_all_retries(tg, monkeypatch):
+    monkeypatch.setattr(tg, "api", mock.Mock(side_effect=OSError("down")))
+    monkeypatch.setattr(tg, "ensure_server", lambda: "PROC")
+    monkeypatch.setattr(tg.time, "sleep", lambda s: None)
+    monkeypatch.setattr(tg, "collect_turn_tools", lambda sid, pre: [])
+    reply, tools = tg.run_turn("S", "hi")
+    assert reply == "" and tools == []
+
+
+def test_text_report_action_without_detail(tg):
+    actions = [{"tool": "read", "detail": "", "ok": True, "error": ""}]
+    out = tg.text_report("h", "r", actions, [], [])
+    assert "قرأت" in out
+
+
+def test_spoken_report_with_files_and_empty_reply(tg):
+    out = tg.spoken_report("h", "", [], ["/a.md"], ["/b.md"])
+    assert "أنشأت الملفات" in out and "عدلت الملفات" in out
+
+
+def test_make_voice_note_uses_gtts_when_available(tg, tmp_path, monkeypatch):
+    import sys
+
+    class FakeGtts:
+        def __init__(self, text, lang="ar"):
+            self.text = text
+
+        def save(self, path):
+            Path(path).write_bytes(b"mp3")
+
+    mod = types.ModuleType("gtts")
+    mod.gTTS = FakeGtts                                    # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "gtts", mod)
+    monkeypatch.setattr(tg.subprocess, "run", lambda *a, **k: mock.Mock(returncode=0))
+    monkeypatch.setattr(tg.os.path, "getsize", lambda p: 10)
+    out = tg.make_voice_note("hello", str(tmp_path / "v.ogg"))
+    assert out == str(tmp_path / "v.ogg")
+
+
+def test_make_voice_note_none_when_espeak_fails(tg, tmp_path, monkeypatch):
+    import sys
+    monkeypatch.setitem(sys.modules, "gtts", None)
+    monkeypatch.setattr(tg.subprocess, "run",
+                        mock.Mock(side_effect=RuntimeError("no espeak")))
+    assert tg.make_voice_note("hi", str(tmp_path / "v.ogg")) is None
+
+
+def test_make_voice_note_none_when_ffmpeg_fails(tg, tmp_path, monkeypatch):
+    import sys
+    monkeypatch.setitem(sys.modules, "gtts", None)
+
+    def run(cmd, **k):
+        if cmd[0] == "ffmpeg":
+            raise RuntimeError("no ffmpeg")
+        return mock.Mock(returncode=0)
+
+    monkeypatch.setattr(tg.subprocess, "run", run)
+    assert tg.make_voice_note("hi", str(tmp_path / "v.ogg")) is None
+
+
+def test_transcribe_empty_when_ffmpeg_fails(tg, tmp_path, monkeypatch):
+    monkeypatch.setattr(tg.subprocess, "run",
+                        mock.Mock(side_effect=RuntimeError("no ffmpeg")))
+    assert tg.transcribe(str(tmp_path / "a.oga")) == ""
+
+
+def test_build_and_send_without_voice_and_photo_error(tg, tmp_path, monkeypatch, capsys):
+    img = tmp_path / "x.png"
+    img.write_bytes(b"x")
+    tools = [{"tool": "write", "state": {"status": "completed",
+              "input": {"filePath": str(img)}, "metadata": {"exists": False}}}]
+    monkeypatch.setattr(tg, "WORK_DIR", str(tmp_path))
+    monkeypatch.setattr(tg, "send_message", lambda *a, **k: None)
+    monkeypatch.setattr(tg, "send_action", lambda *a, **k: None)
+    monkeypatch.setattr(tg, "make_voice_note", lambda *a, **k: None)
+
+    def boom(*a, **k):
+        raise RuntimeError("photo fail")
+
+    monkeypatch.setattr(tg, "send_photo", boom)
+    tg.build_and_send("1", "h", "r", tools)
+    assert "sendPhoto failed" in capsys.readouterr().out
+
+
+def test_worker_warns_when_server_unavailable(tg, monkeypatch):
+    sent = []
+    monkeypatch.setattr(tg, "ensure_server", lambda: None)
+    monkeypatch.setattr(tg, "send_message", lambda c, t, **k: sent.append(t))
+    monkeypatch.setattr(tg, "WORKQ", _OneShotQueue([("42", "hi")]))
+    with pytest.raises(KeyboardInterrupt):
+        tg.worker()
+    assert any("تعذّر تشغيل" in t for t in sent)
+
+
+def test_worker_reports_turn_error(tg, monkeypatch):
+    sent = []
+    monkeypatch.setattr(tg, "ensure_server", lambda: "PROC")
+    monkeypatch.setattr(tg, "get_session", lambda: "S")
+    monkeypatch.setattr(tg, "send_action", lambda *a, **k: None)
+    monkeypatch.setattr(tg, "send_message", lambda c, t, **k: sent.append(t))
+    monkeypatch.setattr(tg, "run_turn", mock.Mock(side_effect=RuntimeError("kaboom")))
+    monkeypatch.setattr(tg, "WORKQ", _OneShotQueue([("42", "hi")]))
+    with pytest.raises(KeyboardInterrupt):
+        tg.worker()
+    assert any("خطأ" in t for t in sent)
+
+
+def test_handle_control_new_session_error(tg, monkeypatch):
+    sent = []
+    monkeypatch.setattr(tg, "send_message", lambda c, t, **k: sent.append(t))
+    monkeypatch.setattr(tg, "get_session",
+                        mock.Mock(side_effect=RuntimeError("no server")))
+    assert tg.handle_control("1", "/new") is True
+    assert any("⚠️" in t for t in sent)
+
+
+def test_handle_control_stop_without_sid(tg, monkeypatch):
+    monkeypatch.setattr(tg, "send_message", lambda *a, **k: None)
+    monkeypatch.setattr(tg, "CURRENT_SID", None)
+    assert tg.handle_control("1", "stop") is True
+    assert tg.PAUSED is True
+
+
+def test_handle_control_stop_abort_error_swallowed(tg, monkeypatch):
+    monkeypatch.setattr(tg, "send_message", lambda *a, **k: None)
+    monkeypatch.setattr(tg, "CURRENT_SID", "S")
+    monkeypatch.setattr(tg, "api", mock.Mock(side_effect=RuntimeError("abort fail")))
+    assert tg.handle_control("1", "/stop") is True
+
+
+def test_poll_loop_control_message_is_not_queued(tg, monkeypatch):
+    queued = []
+    monkeypatch.setattr(tg, "ALLOWED_CHAT", "")
+    monkeypatch.setattr(tg, "send_action", lambda *a, **k: None)
+    monkeypatch.setattr(tg, "handle_control", lambda c, t: True)
+    monkeypatch.setattr(tg, "WORKQ", _OneShotQueue(queued))
+
+    state = {"i": 0}
+
+    def fake_tg(method, params=None, **k):
+        if method == "getMe":
+            return {"result": {"username": "b"}}
+        state["i"] += 1
+        if state["i"] == 1:
+            return {"result": [{"update_id": 1,
+                    "message": {"chat": {"id": 5}, "text": "/help"}}]}
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(tg, "tg", fake_tg)
+    with pytest.raises(KeyboardInterrupt):
+        tg.poll_loop()
+    assert queued == []
+
+
+def test_poll_loop_handles_voice_transcription(tg, monkeypatch):
+    monkeypatch.setattr(tg, "ALLOWED_CHAT", "")
+    monkeypatch.setattr(tg, "send_action", lambda *a, **k: None)
+    monkeypatch.setattr(tg, "download_file", lambda fid, dest: dest)
+    monkeypatch.setattr(tg, "transcribe", lambda p, **k: "شغل الأداة")
+    monkeypatch.setattr(tg, "send_message", lambda *a, **k: None)
+    monkeypatch.setattr(tg, "handle_control", lambda c, t: False)
+    q = _OneShotQueue([])
+    monkeypatch.setattr(tg, "WORKQ", q)
+
+    state = {"i": 0}
+
+    def fake_tg(method, params=None, **k):
+        if method == "getMe":
+            return {"result": {"username": "b"}}
+        state["i"] += 1
+        if state["i"] == 1:
+            return {"result": [{"update_id": 1, "message": {"chat": {"id": 5},
+                    "voice": {"file_id": "F"}}}]}
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(tg, "tg", fake_tg)
+    with pytest.raises(KeyboardInterrupt):
+        tg.poll_loop()
+    assert q.items == [("5", "شغل الأداة")]
+
+
+def test_poll_loop_voice_not_understood(tg, monkeypatch):
+    sent = []
+    monkeypatch.setattr(tg, "ALLOWED_CHAT", "")
+    monkeypatch.setattr(tg, "send_action", lambda *a, **k: None)
+    monkeypatch.setattr(tg, "download_file", lambda fid, dest: dest)
+    monkeypatch.setattr(tg, "transcribe", lambda p, **k: "")
+    monkeypatch.setattr(tg, "send_message", lambda c, t, **k: sent.append(t))
+    monkeypatch.setattr(tg, "WORKQ", _OneShotQueue([]))
+
+    state = {"i": 0}
+
+    def fake_tg(method, params=None, **k):
+        if method == "getMe":
+            return {"result": {"username": "b"}}
+        state["i"] += 1
+        if state["i"] == 1:
+            return {"result": [{"update_id": 1, "message": {"chat": {"id": 5},
+                    "voice": {"file_id": "F"}}}]}
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(tg, "tg", fake_tg)
+    with pytest.raises(KeyboardInterrupt):
+        tg.poll_loop()
+    assert any("ما قدرت أفهم" in t for t in sent)
+
+
+def test_poll_loop_voice_control_message_not_queued(tg, monkeypatch):
+    monkeypatch.setattr(tg, "ALLOWED_CHAT", "")
+    monkeypatch.setattr(tg, "send_action", lambda *a, **k: None)
+    monkeypatch.setattr(tg, "download_file", lambda fid, dest: dest)
+    monkeypatch.setattr(tg, "transcribe", lambda p, **k: "توقف")
+    monkeypatch.setattr(tg, "send_message", lambda *a, **k: None)
+    monkeypatch.setattr(tg, "handle_control", lambda c, t: True)
+    q = _OneShotQueue([])
+    monkeypatch.setattr(tg, "WORKQ", q)
+
+    state = {"i": 0}
+
+    def fake_tg(method, params=None, **k):
+        if method == "getMe":
+            return {"result": {"username": "b"}}
+        state["i"] += 1
+        if state["i"] == 1:
+            return {"result": [{"update_id": 1, "message": {"chat": {"id": 5},
+                    "voice": {"file_id": "F"}}}]}
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(tg, "tg", fake_tg)
+    with pytest.raises(KeyboardInterrupt):
+        tg.poll_loop()
+    assert q.items == []
+
+
+def test_poll_loop_network_error(tg, monkeypatch, capsys):
+    def fake_tg(method, params=None, **k):
+        if method == "getMe":
+            return {"result": {"username": "b"}}
+        raise urllib.error.URLError("net down")
+
+    monkeypatch.setattr(tg, "tg", fake_tg)
+    monkeypatch.setattr(tg.time, "sleep",
+                        lambda s: (_ for _ in ()).throw(KeyboardInterrupt))
+    with pytest.raises(KeyboardInterrupt):
+        tg.poll_loop()
+    assert "poll network error" in capsys.readouterr().out
+
+
+def test_poll_loop_generic_error(tg, monkeypatch, capsys):
+    def fake_tg(method, params=None, **k):
+        if method == "getMe":
+            return {"result": {"username": "b"}}
+        raise ValueError("weird")
+
+    monkeypatch.setattr(tg, "tg", fake_tg)
+    monkeypatch.setattr(tg.time, "sleep",
+                        lambda s: (_ for _ in ()).throw(KeyboardInterrupt))
+    with pytest.raises(KeyboardInterrupt):
+        tg.poll_loop()
+    assert "poll error" in capsys.readouterr().out
+
+
+def test_main_warns_when_server_down(tg, monkeypatch, capsys):
+    monkeypatch.setattr(tg, "TOKEN", "T")
+    monkeypatch.setattr(tg.subprocess, "Popen", lambda *a, **k: None)
+    monkeypatch.setattr(tg, "ensure_server", lambda: None)
+    monkeypatch.setattr(tg, "get_session", lambda: "S")
+    monkeypatch.setattr(tg, "PermissionWatchdog",
+                        lambda: types.SimpleNamespace(start=lambda: None))
+    monkeypatch.setattr(tg.threading, "Thread",
+                        lambda *a, **k: types.SimpleNamespace(start=lambda: None))
+    monkeypatch.setattr(tg, "poll_loop", lambda: None)
+    monkeypatch.setattr(tg.sys, "argv", ["zyvo-telegram"])
+    tg.main()
+    assert "WARNING" in capsys.readouterr().out
+
+
+def test_start_server_raises_when_never_ready(tg, tmp_path, monkeypatch):
+    monkeypatch.setattr(shutil, "which", lambda n: "/usr/bin/" + n)
+    monkeypatch.setattr(tg, "LOG_SERVER", str(tmp_path / "srv.log"))
+
+    class Zombie(FakePopen):
+        def poll(self):
+            return None                             # never exits
+
+    monkeypatch.setattr(tg.subprocess, "Popen", Zombie)
+    monkeypatch.setattr(tg, "server_up", lambda: False)
+    monkeypatch.setattr(tg, "kill_tree", lambda p: None)
+    monkeypatch.setattr(tg.time, "sleep", lambda s: None)
+    with pytest.raises(RuntimeError, match="did not come up"):
+        tg.start_server()
+
+
+def test_watchdog_get_error_is_swallowed(tg, monkeypatch):
+    monkeypatch.setattr(tg, "CURRENT_SID", "S")
+
+    def api(method, path, body=None, *a, **k):
+        if method == "GET":
+            raise RuntimeError("boom")
+        return {}
+
+    monkeypatch.setattr(tg, "api", api)
+    monkeypatch.setattr(tg.time, "sleep",
+                        lambda s: (_ for _ in ()).throw(KeyboardInterrupt))
+    wd = tg.PermissionWatchdog()
+    with pytest.raises(KeyboardInterrupt):
+        wd.run()
+
+
+def test_watchdog_exhausts_reply_paths(tg, monkeypatch):
+    monkeypatch.setattr(tg, "CURRENT_SID", "S")
+
+    def api(method, path, body=None, *a, **k):
+        if method == "GET":
+            return [{"id": "1"}] if path == "/session/S/permission" else []
+        raise RuntimeError("both reply paths fail")
+
+    monkeypatch.setattr(tg, "api", api)
+    monkeypatch.setattr(tg.time, "sleep",
+                        lambda s: (_ for _ in ()).throw(KeyboardInterrupt))
+    wd = tg.PermissionWatchdog()
+    with pytest.raises(KeyboardInterrupt):
+        wd.run()
+
+
+def test_poll_loop_continues_after_voice(tg, monkeypatch):
+    monkeypatch.setattr(tg, "ALLOWED_CHAT", "")
+    monkeypatch.setattr(tg, "send_action", lambda *a, **k: None)
+    monkeypatch.setattr(tg, "download_file", lambda fid, dest: dest)
+    monkeypatch.setattr(tg, "transcribe", lambda p, **k: "شغل")
+    monkeypatch.setattr(tg, "send_message", lambda *a, **k: None)
+    monkeypatch.setattr(tg, "handle_control", lambda c, t: False)
+    q = _OneShotQueue([])
+    monkeypatch.setattr(tg, "WORKQ", q)
+
+    state = {"i": 0}
+
+    def fake_tg(method, params=None, **k):
+        if method == "getMe":
+            return {"result": {"username": "b"}}
+        state["i"] += 1
+        if state["i"] == 1:
+            return {"result": [
+                {"update_id": 1, "message": {"chat": {"id": 5},
+                 "voice": {"file_id": "F"}}},
+                {"update_id": 2, "message": {"chat": {"id": 5},
+                 "photo": [{"file_id": "P"}]}},   # ignored -> loop continues
+            ]}
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(tg, "tg", fake_tg)
+    with pytest.raises(KeyboardInterrupt):
+        tg.poll_loop()
+    assert q.items == [("5", "شغل")]
+
+
+def test_main_survives_wake_lock_failure(tg, monkeypatch):
+    monkeypatch.setattr(tg, "TOKEN", "T")
+    monkeypatch.setattr(tg, "ALLOWED_CHAT", "42")
+    monkeypatch.setattr(tg.subprocess, "Popen",
+                        mock.Mock(side_effect=OSError("no termux")))
+    monkeypatch.setattr(tg, "tg", lambda m, p, **k: {"ok": True})
+    monkeypatch.setattr(tg.sys, "argv", ["zyvo-telegram", "--send-test"])
+    tg.main()                                       # must not raise

@@ -11,7 +11,7 @@ tests/
 └── test_zyvo_voice.py     # unit tests for the voice assistant
 ```
 
-As of the last run: **101 tests, ~83 % coverage** (branch coverage).
+As of the last run: **172 tests, 100 % coverage** (branch coverage).
 
 ---
 

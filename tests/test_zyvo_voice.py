@@ -11,6 +11,7 @@ from __future__ import annotations
 import io
 import types
 import urllib.error
+from unittest import mock
 
 import pytest
 
@@ -477,6 +478,336 @@ def test_main_text_mode(voice, monkeypatch):
     assert rendered and rendered[0][0] == "hi"
 
 
+# --------------------------------------------------------------------------- #
+# Extra edge paths (coverage hardening)
+# --------------------------------------------------------------------------- #
+def test_show_without_color(voice, capsys, monkeypatch):
+    monkeypatch.setattr(voice, "_RTL", "")
+    voice.show("plain")
+    out = capsys.readouterr().out
+    assert "plain" in out
+    assert voice.C_RESET not in out
+
+
+def test_start_server_waits_until_ready(voice, tmp_path, monkeypatch):
+    monkeypatch.setattr(voice.shutil, "which", lambda n: "/usr/bin/" + n)
+    monkeypatch.setattr(voice, "LOG", str(tmp_path / "v.log"))
+    monkeypatch.setattr(voice.subprocess, "Popen", FakePopen)
+    state = {"n": 0}
+
+    def server_up():
+        state["n"] += 1
+        return state["n"] >= 2
+
+    monkeypatch.setattr(voice, "server_up", server_up)
+    monkeypatch.setattr(voice.time, "sleep", lambda s: None)
+    proc = voice.start_server()
+    assert proc is FakePopen.last
+
+
+def test_kill_tree_fallback_when_getpgid_fails(voice, monkeypatch):
+    monkeypatch.setattr(voice.os, "getpgid",
+                        lambda pid: (_ for _ in ()).throw(ProcessLookupError()))
+    monkeypatch.setattr(voice.time, "sleep", lambda s: None)
+
+    class Zombie:
+        pid = 9
+
+        def poll(self):
+            return None
+
+        def terminate(self):
+            raise RuntimeError("cannot terminate")
+
+    voice.kill_tree(Zombie())                       # type: ignore[arg-type]
+
+
+def test_kill_tree_returns_when_proc_already_dead(voice, monkeypatch):
+    monkeypatch.setattr(voice.os, "getpgid", lambda pid: pid)
+    monkeypatch.setattr(voice.os, "killpg", lambda pg, sig: None)
+    monkeypatch.setattr(voice.time, "sleep", lambda s: None)
+
+    class Dead:
+        pid = 9
+
+        def poll(self):
+            return 0
+
+    voice.kill_tree(Dead())                         # type: ignore[arg-type]
+
+
+def test_ensure_server_waits_for_existing_proc(voice, monkeypatch):
+    monkeypatch.setattr(voice, "server_up", lambda: False)
+    killed = []
+    monkeypatch.setattr(voice, "kill_tree", lambda p: killed.append(p))
+    monkeypatch.setattr(voice.time, "sleep", lambda s: None)
+
+    class Live:
+        def poll(self):
+            return None
+
+    live = Live()
+    voice._PROC = live
+    monkeypatch.setattr(voice, "start_server", lambda: "NEW")
+    assert voice.ensure_server() == "NEW"
+    assert killed == [live]
+
+
+def test_ensure_server_gives_up_returns_none(voice, monkeypatch):
+    monkeypatch.setattr(voice, "server_up", lambda: False)
+    monkeypatch.setattr(voice, "kill_tree", lambda p: None)
+    monkeypatch.setattr(voice.time, "sleep", lambda s: None)
+
+    def boom():
+        raise RuntimeError("cannot start")
+
+    monkeypatch.setattr(voice, "start_server", boom)
+    assert voice.ensure_server() is None
+
+
+def test_get_session_creates_when_state_empty(voice, tmp_path, monkeypatch):
+    state = tmp_path / "sess"
+    state.write_text("", encoding="utf-8")
+    monkeypatch.setattr(voice, "STATE_FILE", str(state))
+    monkeypatch.setattr(voice, "STATE_DIR", str(tmp_path))
+    monkeypatch.setattr(voice, "api", lambda *a, **k: {"id": "NEW"})
+    assert voice.get_session() == "NEW"
+
+
+def test_get_session_creates_when_api_response_falsy(voice, tmp_path, monkeypatch):
+    state = tmp_path / "sess"
+    state.write_text("OLD", encoding="utf-8")
+    monkeypatch.setattr(voice, "STATE_FILE", str(state))
+    monkeypatch.setattr(voice, "STATE_DIR", str(tmp_path))
+
+    def api(method, path, *a, **k):
+        if method == "GET":
+            return None
+        return {"id": "NEW2"}
+
+    monkeypatch.setattr(voice, "api", api)
+    assert voice.get_session() == "NEW2"
+
+
+def test_get_session_creates_when_api_raises(voice, tmp_path, monkeypatch):
+    state = tmp_path / "sess"
+    state.write_text("OLD", encoding="utf-8")
+    monkeypatch.setattr(voice, "STATE_FILE", str(state))
+    monkeypatch.setattr(voice, "STATE_DIR", str(tmp_path))
+
+    def api(method, path, *a, **k):
+        if method == "GET":
+            raise RuntimeError("404")
+        return {"id": "NEW3"}
+
+    monkeypatch.setattr(voice, "api", api)
+    assert voice.get_session() == "NEW3"
+
+
+def test_watchdog_stop_flag_and_immediate_return(voice):
+    wd = voice.PermissionWatchdog()
+    assert wd._stop is False
+    wd.stop()
+    assert wd._stop is True
+    wd.run()                                        # returns at once
+
+
+def test_watchdog_skips_without_sid(voice, monkeypatch):
+    monkeypatch.setattr(voice.time, "sleep",
+                        lambda s: (_ for _ in ()).throw(KeyboardInterrupt))
+    wd = voice.PermissionWatchdog()
+    wd.sid = None
+    with pytest.raises(KeyboardInterrupt):
+        wd.run()
+
+
+def test_watchdog_nonlist_missing_rid_and_post_fallback(voice, monkeypatch):
+    posted = []
+
+    def api(method, path, body=None, *a, **k):
+        if method == "GET":
+            if path == "/session/S/permission":
+                return [{"id": "R1"}, {}]           # 2nd has no rid
+            return {"not": "a list"}                # non-list branch
+        posted.append(path)
+        if path.startswith("/session/S/permission/R1/reply"):
+            raise RuntimeError("bad")
+        return {}
+
+    monkeypatch.setattr(voice, "api", api)
+    monkeypatch.setattr(voice.time, "sleep",
+                        lambda s: (_ for _ in ()).throw(KeyboardInterrupt))
+    wd = voice.PermissionWatchdog()
+    wd.sid = "S"
+    with pytest.raises(KeyboardInterrupt):
+        wd.run()
+    assert any(p.endswith("/permission/R1/reply") for p in posted)
+
+
+def test_watchdog_get_error_is_swallowed(voice, monkeypatch):
+    def api(method, path, body=None, *a, **k):
+        if method == "GET":
+            raise RuntimeError("boom")
+        return {}
+
+    monkeypatch.setattr(voice, "api", api)
+    monkeypatch.setattr(voice.time, "sleep",
+                        lambda s: (_ for _ in ()).throw(KeyboardInterrupt))
+    wd = voice.PermissionWatchdog()
+    wd.sid = "S"
+    with pytest.raises(KeyboardInterrupt):
+        wd.run()
+
+
+def test_collect_turn_tools_skips_non_assistant(voice, monkeypatch):
+    msgs = [
+        {"info": {"role": "user"}, "parts": [{"type": "tool", "tool": "x"}]},
+        {"info": {"role": "assistant"}, "parts": [
+            {"type": "tool", "tool": "bash"},
+            {"type": "text", "text": "hi", "synthetic": False},
+        ]},
+    ]
+    monkeypatch.setattr(voice, "api", lambda *a, **k: msgs)
+    tools, last_text = voice.collect_turn_tools("S", 0)
+    assert [t["tool"] for t in tools] == ["bash"]
+    assert last_text == "hi"
+
+
+def test_parse_tools_file_tool_without_path(voice):
+    actions, created, modified = voice.parse_tools([
+        {"tool": "edit", "state": {"input": {}, "status": "completed",
+                                   "metadata": {}}},
+    ])
+    assert created == [] and modified == []
+    assert len(actions) == 1
+
+
+def test_run_turn_exhausts_all_retries(voice, monkeypatch):
+    monkeypatch.setattr(voice, "session_message_count", lambda sid: 0)
+    monkeypatch.setattr(voice, "api", mock.Mock(side_effect=RuntimeError("down")))
+    monkeypatch.setattr(voice, "ensure_server", lambda: "P")
+    monkeypatch.setattr(voice.time, "sleep", lambda s: None)
+    monkeypatch.setattr(voice, "collect_turn_tools", lambda sid, n0: ([], ""))
+    reply, tools = voice.run_turn("S", "hi")
+    assert reply == "" and tools == []
+
+
+def test_run_turn_uses_long_sleep_when_server_missing(voice, monkeypatch):
+    sleeps = []
+    state = {"n": 0}
+
+    def api(*a, **k):
+        state["n"] += 1
+        if state["n"] == 1:
+            raise RuntimeError("down")
+        return {"parts": [{"type": "text", "text": "ok"}]}
+
+    monkeypatch.setattr(voice, "session_message_count", lambda sid: 0)
+    monkeypatch.setattr(voice, "api", api)
+    monkeypatch.setattr(voice, "ensure_server", lambda: None)
+    monkeypatch.setattr(voice.time, "sleep", lambda s: sleeps.append(s))
+    monkeypatch.setattr(voice, "collect_turn_tools", lambda sid, n0: ([], ""))
+    reply, _ = voice.run_turn("S", "hi")
+    assert reply == "ok"
+    assert 2 in sleeps
+
+
+def test_render_report_action_without_detail(voice, capsys, monkeypatch):
+    monkeypatch.setattr(voice, "_RTL", "")
+    actions = [{"tool": "read", "detail": "", "ok": True,
+                "status": "completed", "error": ""}]
+    voice.render_report("h", "r", actions, [], [])
+    assert "قرأت" in capsys.readouterr().out
+
+
+def test_listen_json_non_dict_returns_raw(voice, monkeypatch):
+    monkeypatch.setattr(voice.subprocess, "run",
+                        lambda *a, **k: types.SimpleNamespace(stdout="[1,2]"))
+    assert voice.listen() == "[1,2]"
+
+
+def test_speak_without_lang_and_swallows_error(voice, monkeypatch):
+    calls = []
+
+    def run(cmd, *a, **k):
+        calls.append(cmd)
+        raise OSError("no tts")
+
+    monkeypatch.setattr(voice, "TTS_LANG", "")
+    monkeypatch.setattr(voice.subprocess, "run", run)
+    voice.speak("hello")                            # must not raise
+    assert calls[0] == ["termux-tts-speak", "hello"]
+
+
+def test_main_exits_when_server_unavailable(voice, monkeypatch):
+    monkeypatch.setattr(voice.sys, "argv", ["zyvo-voice.py", "--text", "hi"])
+    monkeypatch.setattr(voice, "ensure_server", lambda: None)
+    monkeypatch.setattr(voice, "kill_tree", lambda p: None)
+    with pytest.raises(SystemExit):
+        voice.main()
+
+
+class _FakeWD:
+    def __init__(self):
+        self.sid = None
+
+    def start(self):
+        pass
+
+
+def _patch_main_common(voice, monkeypatch, run_turn=None):
+    monkeypatch.setattr(voice, "ensure_server", lambda: "P")
+    monkeypatch.setattr(voice, "get_session", lambda force_new=False: "S")
+    monkeypatch.setattr(voice, "kill_tree", lambda p: None)
+    monkeypatch.setattr(voice, "PermissionWatchdog", _FakeWD)
+    if run_turn is not None:
+        monkeypatch.setattr(voice, "run_turn", run_turn)
+
+
+def test_main_interactive_loop_no_mic(voice, monkeypatch, capsys):
+    monkeypatch.setattr(voice.sys, "argv", ["zyvo-voice.py", "--no-mic", "--no-speak"])
+    _patch_main_common(voice, monkeypatch, lambda s, t: ("done", []))
+    monkeypatch.setattr(voice, "parse_tools", lambda t: ([], [], []))
+    monkeypatch.setattr(voice, "render_report", lambda *a: None)
+    monkeypatch.setattr(voice, "speak", lambda *a, **k: None)
+
+    inputs = iter(["hello", "", "stop"])
+    monkeypatch.setattr("builtins.input", lambda *a: next(inputs))
+    voice.main()
+    assert "banaf-fez" in capsys.readouterr().out
+
+
+def test_main_mic_loop_no_report(voice, monkeypatch):
+    monkeypatch.setattr(voice.sys, "argv", ["zyvo-voice.py", "--no-report"])
+    _patch_main_common(voice, monkeypatch, lambda s, t: ("answer", []))
+    monkeypatch.setattr(voice, "parse_tools", lambda t: ([], [], []))
+    monkeypatch.setattr(voice, "render_report", lambda *a: None)
+    spoken = []
+    monkeypatch.setattr(voice, "speak", lambda t, *a, **k: spoken.append(t))
+    monkeypatch.setattr(voice, "buzz", lambda: None)
+    slept = []
+    monkeypatch.setattr(voice.time, "sleep", lambda s: slept.append(s))
+
+    seq = iter(["", "do it", "stop"])
+    monkeypatch.setattr(voice, "listen", lambda: next(seq))
+    voice.main()
+    assert any("ما سمعتك" in s for s in spoken)      # empty-heard branch
+    assert "answer" in spoken                        # --no-report -> reply only
+    assert 0.4 in slept
+
+
+def test_main_handles_keyboard_interrupt(voice, monkeypatch, capsys):
+    monkeypatch.setattr(voice.sys, "argv", ["zyvo-voice.py", "--no-mic"])
+    _patch_main_common(voice, monkeypatch)
+
+    def boom(*a):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("builtins.input", boom)
+    voice.main()
+    assert "et2af" in capsys.readouterr().out
+
+
 def test_main_chat_mode_sets_reject(voice, monkeypatch):
     monkeypatch.setattr(voice.sys, "argv",
                         ["zyvo-voice.py", "--chat", "--text", "hi"])
@@ -497,3 +828,82 @@ class _DummyWD:
 
     def start(self) -> None:
         pass
+
+
+def test_start_server_raises_when_never_ready(voice, tmp_path, monkeypatch):
+    monkeypatch.setattr(voice.shutil, "which", lambda n: "/usr/bin/" + n)
+    monkeypatch.setattr(voice, "LOG", str(tmp_path / "v.log"))
+
+    class Zombie(FakePopen):
+        def poll(self):
+            return None                             # never exits
+
+    monkeypatch.setattr(voice.subprocess, "Popen", Zombie)
+    monkeypatch.setattr(voice, "server_up", lambda: False)
+    monkeypatch.setattr(voice, "kill_tree", lambda p: None)
+    monkeypatch.setattr(voice.time, "sleep", lambda s: None)
+    with pytest.raises(RuntimeError, match="did not come up"):
+        voice.start_server()
+
+
+def test_ensure_server_wait_finds_server(voice, monkeypatch):
+    calls = {"n": 0}
+
+    def server_up():
+        calls["n"] += 1
+        return calls["n"] >= 2                       # False at top, True in wait
+
+    monkeypatch.setattr(voice, "server_up", server_up)
+    monkeypatch.setattr(voice.time, "sleep", lambda s: None)
+
+    class Live:
+        def poll(self):
+            return None
+
+    live = Live()
+    voice._PROC = live
+    assert voice.ensure_server() is live
+
+
+def test_module_detects_rtl_via_path_lookup(monkeypatch):
+    import importlib.util
+    import sys
+    from pathlib import Path as _P
+
+    root = _P(__file__).resolve().parent.parent
+    monkeypatch.setattr("os.path.exists", lambda p: False)      # "~/bin/rtl" absent
+    monkeypatch.setattr("shutil.which", lambda n: "/usr/bin/rtl")
+    spec = importlib.util.spec_from_file_location(
+        "zyvo_voice_reload", str(root / "zyvo-voice.py"))
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["zyvo_voice_reload"] = module
+    spec.loader.exec_module(module)
+    assert module._RTL == "/usr/bin/rtl"
+
+
+def test_watchdog_exhausts_reply_paths(voice, monkeypatch):
+    monkeypatch.setattr(voice.time, "sleep",
+                        lambda s: (_ for _ in ()).throw(KeyboardInterrupt))
+
+    def api(method, path, body=None, *a, **k):
+        if method == "GET":
+            return [{"id": "R1"}]
+        raise RuntimeError("both reply paths fail")
+
+    monkeypatch.setattr(voice, "api", api)
+    wd = voice.PermissionWatchdog()
+    wd.sid = "S"
+    with pytest.raises(KeyboardInterrupt):
+        wd.run()
+
+
+def test_main_eof_breaks_loop(voice, monkeypatch, capsys):
+    monkeypatch.setattr(voice.sys, "argv", ["zyvo-voice.py", "--no-mic", "--no-speak"])
+    _patch_main_common(voice, monkeypatch)
+
+    def raise_eof(*a):
+        raise EOFError
+
+    monkeypatch.setattr("builtins.input", raise_eof)
+    voice.main()
+    assert "session S" in capsys.readouterr().out
