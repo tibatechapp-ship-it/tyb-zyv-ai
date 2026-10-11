@@ -69,7 +69,12 @@ bonus fuzz, chaos. Run: `python -m pytest tests/adversarial/ -v`.
   tests total, 98.5% cov). Fixed 2 real weaknesses it found: `BaseAgent.run` now
   rejects a non-`str` backend return (Byzantine); `CommandQueue._load` catches
   `RecursionError` from a nested-JSON bomb (was a startup crash).
-- 2026-10-11: version lives in pyproject.toml AND src/__init__.py (both 2.3.0).
+- 2026-10-11: v2.4.0 — deep hardening: `AgentMetrics` now guards all reads/writes
+  with an instance `RLock` (reentrant — `to_dict` nests); `AgentRegistry` guards
+  every method with one `threading.Lock` and `__iter__` returns a snapshot. Lock
+  order is fixed registry→metrics. `tests/test_concurrency.py` (11 tests: 100-thread
+  races, deadlock, lock-ordering, benchmark). 615 tests, 98.5% cov.
+- 2026-10-11: version lives in pyproject.toml AND src/__init__.py (both 2.4.0).
 - 2026-10-11: git push via `gh` credential helper; releases via `gh release create`.
 - Lesson: pytest `python_classes=Test*` collects agent class `TesterAgent`/alias
   `Tester` → PytestCollectionWarning. Never import `TesterAgent` under a

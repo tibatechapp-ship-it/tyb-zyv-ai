@@ -162,6 +162,21 @@ exhaustion in the persistent queue (both documented in `ADVERSARIAL.md`).
 
 ---
 
+## Concurrency hardening (`test_concurrency.py`)
+
+`AgentMetrics.record` and `AgentRegistry.register` are the two shared, mutable
+coordination points. Both are now genuinely thread-safe — `AgentMetrics` uses an
+instance `RLock` (reentrant, because `to_dict` nests through its read helpers),
+`AgentRegistry` uses a single `threading.Lock` on every method with `__iter__`
+yielding a snapshot. `test_concurrency.py` proves it with **100 real threads**
+per race (barrier-released for maximum contention, 30 s join timeout = deadlock
+assertion): no lost metric updates, no torn snapshots, no duplicate-register
+race, 200 agents under concurrent read/write, plus **deadlock** and
+**lock-ordering** checks and a `pytest-benchmark` of the locked `record` path
+(~1.5 µs). Findings + fix rationale: `ADVERSARIAL.md` → *Deep Hardening*.
+
+---
+
 ## CI
 
 | Workflow | What it does |
