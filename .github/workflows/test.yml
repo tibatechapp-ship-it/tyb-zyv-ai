@@ -1,0 +1,90 @@
+name: Tests
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  # ── Run the pytest suite with coverage on every supported Python ──────────
+  test:
+    name: pytest (py ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install test deps
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pytest pytest-cov
+
+      - name: Run test suite with coverage
+        run: pytest --cov --cov-report=term-missing
+
+  # ── Publish a shields.io coverage badge (no external service needed) ──────
+  coverage-badge:
+    name: publish coverage badge
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install test deps
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pytest pytest-cov
+
+      - name: Measure coverage
+        run: pytest --cov -q >/dev/null 2>&1
+
+      - name: Write shields endpoint badge
+        run: |
+          python -m coverage json -o coverage.json
+          python - <<'PY'
+          import json, pathlib
+          data = json.loads(pathlib.Path("coverage.json").read_text())
+          pct = round(data["totals"]["percent_covered"])
+          color = ("brightgreen" if pct >= 90 else "green" if pct >= 80
+                   else "yellowgreen" if pct >= 70 else "yellow"
+                   if pct >= 60 else "red")
+          payload = {"schemaVersion": 1, "label": "coverage",
+                     "message": f"{pct}%", "color": color}
+          dest = pathlib.Path(".github/badges/coverage.json")
+          dest.parent.mkdir(parents=True, exist_ok=True)
+          dest.write_text(json.dumps(payload, indent=2) + "\n")
+          print(f"coverage = {pct}% ({color})")
+          PY
+          rm -f coverage.json
+
+      - name: Commit badge
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/badges/coverage.json
+          if git diff --cached --quiet; then
+            echo "Badge unchanged."
+          else
+            git commit -m "chore: update coverage badge [skip ci]"
+            git push
+          fi

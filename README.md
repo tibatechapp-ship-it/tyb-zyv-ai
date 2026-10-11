@@ -5,6 +5,8 @@
 > Android phone.
 
 [![CI](https://github.com/tibatechapp-ship-it/tyb-zyv-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/tibatechapp-ship-it/tyb-zyv-ai/actions/workflows/ci.yml)
+[![Tests](https://github.com/tibatechapp-ship-it/tyb-zyv-ai/actions/workflows/test.yml/badge.svg)](https://github.com/tibatechapp-ship-it/tyb-zyv-ai/actions/workflows/test.yml)
+[![Coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/tibatechapp-ship-it/tyb-zyv-ai/main/.github/badges/coverage.json)](https://github.com/tibatechapp-ship-it/tyb-zyv-ai/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 
@@ -152,6 +154,7 @@ zyvo-voice --text "git status in ~/myapp" --no-speak
 | [`docs/INSTALLATION.md`](docs/INSTALLATION.md) | Every package, app, token and permission needed — start to finish. |
 | [`docs/USAGE.md`](docs/USAGE.md) | All CLI flags, control words, env vars, and recipes. |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | How the pieces fit: PTY server, SSE stream, permission watchdog, retries. |
+| [`docs/TESTING.md`](docs/TESTING.md) | Running the test suite, coverage, fakes, and how CI is wired. |
 | [`docs/FAQ.md`](docs/FAQ.md) | "Service not found", no audio, mic not working, TTS language, and more. |
 
 ---
@@ -174,7 +177,11 @@ zyvo-voice --text "git status in ~/myapp" --no-speak
 Issues and pull requests are welcome.
 1. Fork the repo and create a feature branch.
 2. Keep every function type-annotated (the CI enforces `ruff` + `mypy`).
-3. Open a pull request describing the change.
+3. Run the tests — `pip install pytest pytest-cov && pytest --cov` — and keep
+   coverage at or above 80%.
+4. Open a pull request describing the change.
+
+See [`docs/TESTING.md`](docs/TESTING.md) for the full test/coverage workflow.
 
 ---
 

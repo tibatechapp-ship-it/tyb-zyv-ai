@@ -29,6 +29,8 @@ ENV/
 .ruff_cache/
 .pytest_cache/
 .coverage
+coverage.xml
+coverage.json
 htmlcov/
 .tox/
 
