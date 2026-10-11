@@ -302,8 +302,8 @@ class MemoryManager:
         return self._executemany(
             """
             INSERT OR REPLACE INTO episodes
-                (id, ts, iso, session_id, agent, task, result, ok, duration_s)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (id, ts, iso, session_id, agent, task, result, ok, duration_s, event)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 (
@@ -311,6 +311,7 @@ class MemoryManager:
                     item["data"].get("session_id"), item["data"]["agent"],
                     item["data"]["task"], item["data"]["result"],
                     int(bool(item["data"]["ok"])), float(item["data"]["duration_s"]),
+                    str(item["data"].get("event") or ("success" if item["data"]["ok"] else "error")),
                 )
                 for item in items
             ],

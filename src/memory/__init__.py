@@ -25,7 +25,7 @@ from src.memory.base import (
 )
 from src.memory.embeddings import Embedder, HashingEmbedder, cosine, make_embedder
 from src.memory.emotional import EmotionalMemory, analyze_tone
-from src.memory.episodic import EpisodicMemory
+from src.memory.episodic import EpisodicMemory, EventKind
 from src.memory.manager import MemoryManager
 from src.memory.procedural import ProceduralMemory
 from src.memory.semantic import SemanticMemory
@@ -35,6 +35,7 @@ __all__ = [
     "Embedder",
     "EmotionalMemory",
     "EpisodicMemory",
+    "EventKind",
     "HashingEmbedder",
     "MemoryKind",
     "MemoryManager",
