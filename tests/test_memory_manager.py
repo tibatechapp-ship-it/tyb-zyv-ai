@@ -315,6 +315,32 @@ def test_import_of_empty_snapshot_returns_zero_counts(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
+# embeddings (Phase 2)
+# --------------------------------------------------------------------------- #
+def test_manager_accepts_named_embedder(tmp_path):
+    with MemoryManager(tmp_path / "e.db", embedder="hashing") as mem:
+        mem.semantic.remember("deploy", "ship to github pages", subject="ops")
+        mem.semantic.remember("lunch", "banana smoothie recipe", subject="food")
+        found = mem.semantic.search("deploying to github")
+        assert found and found[0].data["key"] == "deploy"
+
+
+def test_manager_import_recomputes_embeddings(tmp_path):
+    source = MemoryManager(tmp_path / "a.db", clock=FakeClock())
+    source.semantic.remember("user_name", "tyba", subject="user")
+    dump = tmp_path / "dump.json"
+    source.export_json(dump)
+    source.close()
+
+    with MemoryManager(tmp_path / "b.db", embedder="hashing") as mem:
+        mem.import_json(dump)
+        row = mem.connection.execute(
+            "SELECT embedding FROM facts WHERE key = 'user_name'"
+        ).fetchone()
+    assert row is not None and row["embedding"] is not None
+
+
+# --------------------------------------------------------------------------- #
 # concurrency
 # --------------------------------------------------------------------------- #
 def test_concurrent_episode_writes_all_persist(tmp_path):

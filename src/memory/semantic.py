@@ -1,23 +1,23 @@
 """Semantic memory — durable *facts* (subject → key → value).
 
 Facts are stored as rows and retrieved either by exact key or by relevance.
-Phase 1 ranks by lexical (token-overlap) relevance, which needs no dependencies;
-an optional :class:`Embedder` can be supplied so ``remember`` stores a vector and
-``search`` ranks by cosine similarity instead — the Phase 2 upgrade is a
-drop-in, no API change.
+Without an embedder, relevance is lexical (token-overlap), which needs no
+dependencies. Supply an :class:`~src.memory.embeddings.Embedder` (e.g.
+:class:`~src.memory.embeddings.HashingEmbedder`) and ``remember`` stores a vector
+while ``search`` / ``top_k`` rank by cosine similarity — that is the Phase 2
+upgrade, available through the same API.
 """
 
 from __future__ import annotations
 
 import json
-import math
 import re
 import sqlite3
 import time
 from collections.abc import Sequence
-from typing import Protocol
 
 from src.memory.base import Clock, MemoryKind, MemoryRecord, MemoryStore, utc_iso
+from src.memory.embeddings import Embedder, cosine
 
 __all__ = ["Embedder", "SemanticMemory"]
 
@@ -35,24 +35,6 @@ def _lexical_score(query: str, text: str) -> float:
     if not query_tokens:
         return 0.0
     return len(query_tokens & _tokens(text)) / len(query_tokens)
-
-
-def _cosine(a: Sequence[float], b: Sequence[float]) -> float:
-    """Cosine similarity of two equal-length vectors (0.0 on mismatch/zero)."""
-    if len(a) != len(b):
-        return 0.0
-    dot = sum(x * y for x, y in zip(a, b, strict=False))
-    norm_a = math.sqrt(sum(x * x for x in a))
-    norm_b = math.sqrt(sum(y * y for y in b))
-    if norm_a == 0.0 or norm_b == 0.0:
-        return 0.0
-    return dot / (norm_a * norm_b)
-
-
-class Embedder(Protocol):
-    """Anything that maps text to a dense vector (e.g. a model client)."""
-
-    def __call__(self, text: str) -> Sequence[float]: ...
 
 
 class SemanticMemory(MemoryStore):
@@ -165,6 +147,10 @@ class SemanticMemory(MemoryStore):
             return self._vector_search(query, rows, limit)
         return self._lexical_search(query, rows, limit)
 
+    def top_k(self, query: str, k: int = 5) -> list[MemoryRecord]:
+        """The top-``k`` facts for ``query`` — an explicit alias for :meth:`search`."""
+        return self.search(query, limit=k)
+
     def _lexical_search(
         self, query: str, rows: Sequence[sqlite3.Row], limit: int
     ) -> list[MemoryRecord]:
@@ -186,7 +172,7 @@ class SemanticMemory(MemoryStore):
         for row in rows:
             raw = row["embedding"]
             if raw:
-                score = _cosine(query_vector, json.loads(str(raw)))
+                score = cosine(query_vector, json.loads(str(raw)))
             else:
                 score = _lexical_score(query, f"{row['subject']} {row['key']} {row['value']}")
             if score > 0.0:

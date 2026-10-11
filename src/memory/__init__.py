@@ -23,17 +23,19 @@ from src.memory.base import (
     default_memory_path,
     utc_iso,
 )
+from src.memory.embeddings import Embedder, HashingEmbedder, cosine, make_embedder
 from src.memory.emotional import EmotionalMemory, analyze_tone
 from src.memory.episodic import EpisodicMemory
 from src.memory.manager import MemoryManager
 from src.memory.procedural import ProceduralMemory
-from src.memory.semantic import Embedder, SemanticMemory
+from src.memory.semantic import SemanticMemory
 
 __all__ = [
     "Clock",
     "Embedder",
     "EmotionalMemory",
     "EpisodicMemory",
+    "HashingEmbedder",
     "MemoryKind",
     "MemoryManager",
     "MemoryRecord",
@@ -42,6 +44,8 @@ __all__ = [
     "SemanticMemory",
     "analyze_tone",
     "connect",
+    "cosine",
     "default_memory_path",
+    "make_embedder",
     "utc_iso",
 ]

@@ -15,10 +15,11 @@ from src.memory.base import (
     default_memory_path,
     utc_iso,
 )
+from src.memory.embeddings import HashingEmbedder, cosine
 from src.memory.emotional import EmotionalMemory, analyze_tone
 from src.memory.episodic import EpisodicMemory
 from src.memory.procedural import ProceduralMemory
-from src.memory.semantic import SemanticMemory, _cosine, _lexical_score
+from src.memory.semantic import SemanticMemory, _lexical_score
 
 DAY = 86_400.0
 T0 = 1_700_000_000.0
@@ -249,6 +250,20 @@ def test_semantic_remember_without_embedder_leaves_embedding_null(semantic):
     assert row is not None and row["embedding"] is None
 
 
+def test_semantic_top_k_is_alias_for_search(semantic):
+    semantic.remember("site", "github pages", subject="ops")
+    semantic.remember("editor", "vim", subject="tools")
+    assert [r.data["key"] for r in semantic.top_k("github", k=1)] == ["site"]
+
+
+def test_semantic_hashing_embedder_ranks_fuzzy_match(connection):
+    store = SemanticMemory(connection, embedder=HashingEmbedder())
+    store.remember("deploy", "ship the release to github pages", subject="ops")
+    store.remember("lunch", "banana smoothie recipe", subject="food")
+    found = store.search("deploying the release to github")
+    assert found and found[0].data["key"] == "deploy"
+
+
 # --------------------------------------------------------------------------- #
 # lexical / cosine helpers
 # --------------------------------------------------------------------------- #
@@ -266,10 +281,10 @@ def test_lexical_score_ignores_single_character_tokens():
 
 
 def test_cosine_matches_and_mismatches():
-    assert _cosine([1.0, 0.0], [1.0, 0.0]) == pytest.approx(1.0)
-    assert _cosine([1.0, 0.0], [0.0, 1.0]) == pytest.approx(0.0)
-    assert _cosine([1.0], [1.0, 2.0]) == 0.0
-    assert _cosine([0.0, 0.0], [1.0, 1.0]) == 0.0
+    assert cosine([1.0, 0.0], [1.0, 0.0]) == pytest.approx(1.0)
+    assert cosine([1.0, 0.0], [0.0, 1.0]) == pytest.approx(0.0)
+    assert cosine([1.0], [1.0, 2.0]) == 0.0
+    assert cosine([0.0, 0.0], [1.0, 1.0]) == 0.0
 
 
 # --------------------------------------------------------------------------- #

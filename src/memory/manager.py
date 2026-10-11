@@ -25,10 +25,11 @@ from pathlib import Path
 from typing import Any
 
 from src.memory.base import Clock, connect, default_memory_path, utc_iso
+from src.memory.embeddings import Embedder, make_embedder
 from src.memory.emotional import EmotionalMemory
 from src.memory.episodic import EpisodicMemory
 from src.memory.procedural import ProceduralMemory
-from src.memory.semantic import Embedder, SemanticMemory
+from src.memory.semantic import SemanticMemory
 
 __all__ = ["MemoryManager"]
 
@@ -52,14 +53,15 @@ class MemoryManager:
         path: str | os.PathLike[str] | None = None,
         *,
         clock: Clock = time.time,
-        embedder: Embedder | None = None,
+        embedder: Embedder | str | None = None,
     ) -> None:
         self._clock = clock
         self._path = str(default_memory_path() if path is None else path)
         self._connection = connect(self._path)
         self._lock = threading.RLock()
+        self._embedder: Embedder | None = make_embedder(embedder)
         self.episodic = EpisodicMemory(self._connection, clock=clock)
-        self.semantic = SemanticMemory(self._connection, clock=clock, embedder=embedder)
+        self.semantic = SemanticMemory(self._connection, clock=clock, embedder=self._embedder)
         self.procedural = ProceduralMemory(self._connection, clock=clock)
         self.emotional = EmotionalMemory(self._connection, clock=clock)
         self._current_session: str | None = None
@@ -315,20 +317,28 @@ class MemoryManager:
         )
 
     def _import_facts(self, items: list[dict[str, Any]]) -> int:
+        embedder = self._embedder
+        rows: list[tuple[Any, ...]] = []
+        for item in items:
+            data = item["data"]
+            embedding: str | None = None
+            if embedder is not None:
+                text = f"{data.get('subject', '')} {data['key']} {data['value']}"
+                embedding = json.dumps(list(embedder(text)))
+            rows.append(
+                (
+                    item["id"], float(item["ts"]), str(item["iso"]),
+                    data.get("subject", ""), data["key"], data["value"],
+                    data.get("source", ""), embedding,
+                )
+            )
         return self._executemany(
             """
             INSERT OR REPLACE INTO facts
                 (id, ts, iso, subject, key, value, source, embedding)
-            VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            [
-                (
-                    item["id"], float(item["ts"]), str(item["iso"]),
-                    item["data"].get("subject", ""), item["data"]["key"],
-                    item["data"]["value"], item["data"].get("source", ""),
-                )
-                for item in items
-            ],
+            rows,
         )
 
     def _import_skills(self, items: list[dict[str, Any]]) -> int:

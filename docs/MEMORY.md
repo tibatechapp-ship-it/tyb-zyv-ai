@@ -7,6 +7,7 @@ offline on a phone exactly as it does on a desktop.
 ```
 src/memory/
 ├── base.py        # connect(), MemoryRecord, MemoryStore (clock + RLock), MemoryKind
+├── embeddings.py  # HashingEmbedder, cosine, make_embedder (offline semantic search)
 ├── episodic.py    # EpisodicMemory   — what happened (timestamped episodes)
 ├── semantic.py    # SemanticMemory   — what is true   (durable facts)
 ├── procedural.py  # ProceduralMemory — how to do things (named skills)
@@ -80,15 +81,18 @@ mem.semantic.search("arabic")                      # relevance-ranked facts
 mem.semantic.all()                                 # everything, sorted
 ```
 
-**Relevance ranking (Phase 1)** is dependency-free: a lexical (token-overlap)
+**Relevance ranking** is dependency-free: by default a lexical (token-overlap)
 score over subject/key/value. Because it is Unicode-aware, Arabic words match
-too. **Phase 2 upgrade:** pass an `embedder` (`Callable[[str], Sequence[float]]`)
-and `remember` stores a vector while `search` ranks by cosine similarity — the
-call site does not change:
+too. Pass an `embedder` (see [Embeddings](#embeddings-phase-2)) and `remember`
+stores a vector while `search` / `top_k` rank by cosine similarity — the call
+site barely changes:
 
 ```python
-mem = MemoryManager(embedder=my_embedder)     # any model's embedding function
+mem = MemoryManager(embedder="hashing")   # built-in, offline
 ```
+
+`search(query, limit=...)` and its alias `top_k(query, k=...)` return the Top-K
+most relevant facts.
 
 ### Procedural — how to do things
 
@@ -116,6 +120,33 @@ mem.emotional.average_satisfaction()             # mean of all scores, or None
 `analyze_tone(text)` is a small bilingual lexicon (English + common Arabic
 cues) returning `("positive" | "negative" | "neutral", score in [-1, 1])`.
 It is the seam a real sentiment model plugs into later without changing callers.
+
+## Embeddings (Phase 2)
+
+ChromaDB, FAISS and sentence-transformers do not install on a phone (Termux,
+Python 3.14), so the default embedder is a **feature-hashing** model that runs
+anywhere with the standard library — and any real model plugs into the same seam.
+
+```python
+from src.memory import HashingEmbedder, cosine, make_embedder
+
+embedder = HashingEmbedder(dim=512, ngram=3)   # words + character 3-grams
+embedder("deploy the release")                  # -> L2-normalised 512-d vector
+cosine(embedder("deploy"), embedder("deploying"))   # high (typo/stem tolerant)
+
+mem = MemoryManager(embedder="hashing")   # or MemoryManager(embedder=embedder)
+mem = MemoryManager(embedder=my_model)    # any Callable[[str], Sequence[float]]
+```
+
+How it works: every word plus every character *n*-gram inside it is hashed into a
+fixed-size vector with a **signed** hash (the "hashing trick"), then L2-normalised.
+Using `hashlib` (not Python's `hash`) keeps vectors identical across runs and
+machines. This catches typos, stems and substrings that plain token overlap
+misses, while staying fast and fully offline.
+
+`make_embedder(spec)` resolves `None` (→ lexical), a callable (→ unchanged) or a
+name (`"hashing"`). On `import_json`, facts are re-embedded automatically when
+the manager has an embedder configured.
 
 ## Sessions
 
@@ -170,11 +201,13 @@ import writes with a lock as well. A 5-thread × 20-write test asserts that all
 ## Testing
 
 ```bash
-python -m pytest tests/test_memory_stores.py tests/test_memory_manager.py -q
+python -m pytest tests/test_memory_stores.py tests/test_embeddings.py \
+                 tests/test_memory_manager.py -q
 ```
 
 - `tests/test_memory_stores.py` — the four stores + base helpers (injected
   timestamps, no real clock).
+- `tests/test_embeddings.py` — the hashing embedder, cosine and the factory.
 - `tests/test_memory_manager.py` — sessions, context, export/import round-trip,
   idempotent import, concurrency.
 
@@ -184,7 +217,8 @@ The memory package sits at **~99 % coverage**; the whole suite stays above the
 ## Roadmap
 
 - **Phase 1 (done)** — persistent SQLite stores, sessions, context, export/import.
-- **Phase 2** — real embeddings + Top-K semantic search (the `embedder` seam).
+- **Phase 2 (done)** — offline embeddings (`HashingEmbedder`) + Top-K cosine
+  search (the `embedder` seam), reachable by name or callable.
 - **Phase 3** — richer episodic queries ("what did we do yesterday?") + activity graph.
 - **Phase 4** — procedural skills with context retrieval wiring.
 - **Phase 5** — tone analysis, auto-adjusting replies, satisfaction scoring.
