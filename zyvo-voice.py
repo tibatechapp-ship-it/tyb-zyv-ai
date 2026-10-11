@@ -227,7 +227,7 @@ def get_session(force_new: bool = False) -> str:
                     return sid
             except Exception:
                 pass
-    body = {"title": "ZYVO Voice"}
+    body: dict[str, Any] = {"title": "ZYVO Voice"}
     if MODEL_ENV and "/" in MODEL_ENV:
         prov, mid = MODEL_ENV.split("/", 1)
         body["model"] = {"providerID": prov, "id": mid}
