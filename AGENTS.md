@@ -47,7 +47,13 @@ bonus fuzz, chaos. Run: `python -m pytest tests/adversarial/ -v`.
 - `src/core/` — types.py (Message/AgentResult), backend.py (LLMBackend
   protocol + EchoBackend for offline tests), model_router.py (ModelRouter/
   ModelTier/ModelProfile/RoutingDecision: deterministic complexity heuristic ->
-  tier -> cheapest fit; strength filter + explicit override), resilience.py,
+  tier -> cheapest fit; strength filter + explicit override), context_manager.py
+  (ContextManager: token accounting with offline estimate_tokens ~4 chars/token,
+  compaction at 80% ratio — oldest turns evicted to an offload store, optional
+  summarizer folds them into ONE running digest slot never evicted itself,
+  keep_at_least floor + extra eviction when a dense digest tips over, restore()
+  newest-first while budget allows, snapshot();
+  ContextEntry/CompactionResult records), resilience.py,
   watchdog.py, zyvo_client.py (ZyvoBackend → local HTTP 127.0.0.1).
 - `src/tools/` — schemas.py (ToolParameter/ToolSchema frozen tool descriptions;
   to_json_schema/to_openai/to_anthropic renderers; validate_arguments incl.
@@ -228,6 +234,14 @@ bonus fuzz, chaos. Run: `python -m pytest tests/adversarial/ -v`.
   schemas + renderers to OpenAI/Anthropic + argument validation + ToolRegistry),
   sub_agent.py (SubAgentRunner: tools ⊆ parent's, max_depth guard, optional
   router for the child model). 1027 tests, 99.09% cov.
+- 2026-10-11: Phase 8 — ContextManager (token accounting + compaction at 80% +
+  offload): evicted turns land in an offload store (restore() newest-first),
+  summarizer folds them into ONE running digest slot (never evicted; folded into
+  the next digest, no marker stacking), keep_at_least floor, extra eviction when
+  a dense digest tips utilization back over the ratio, auto-compact AFTER append
+  so the history is at/under the ratio when add() returns. LESSON: eviction
+  loops + digest-in-the-same-list designs get index/marker bugs; a separate
+  digest slot is clean and testable. 1053 tests, 99% cov (context_manager 100%).
 - Lesson: pytest `python_classes=Test*` collects agent class `TesterAgent`/alias
   `Tester` → PytestCollectionWarning. Never import `TesterAgent` under a
   Test-prefixed name in tests; use `AGENT_CLASSES` or alias it (e.g. `as QA`).

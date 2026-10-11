@@ -207,6 +207,41 @@ result = runner.spawn(architect, role="linter", task="lint main.py")  # tools �
 
 ---
 
+## Context management (Phase 8)
+
+Long conversations outgrow a model's context window. `src/core/context_manager.py`
+owns one transcript and keeps it under a token budget:
+
+- **Accounting** — every message is priced by an offline `estimate_tokens`
+  (~4 chars/token; injectable estimator). `used_tokens` / `remaining` /
+  `utilization` / `is_overloaded` expose the state at any moment.
+- **Compaction at 80%** — the ratio defaults to `0.8` of the budget. When
+  utilisation crosses it, the oldest turns are evicted (never below
+  `keep_at_least`); a configured `summarizer` folds them into a single running
+  *digest* that lives in its own slot (one per manager, never evicted, folded
+  into the next digest instead of stacking markers). A dense digest that tips
+  utilisation back over the line triggers extra eviction of real turns.
+- **Offload** — every evicted turn lands in the offload store; `restore()`
+  brings the most recent ones back while the budget allows (nothing is ever
+  silently dropped). `snapshot()` serialises the whole state.
+
+`add()` auto-compacts (configurable) and guarantees the history is at or under
+the ratio when it returns, unless a single oversized turn makes that impossible.
+
+```python
+from src.core import ContextManager
+
+ctx = ContextManager(budget=16_000, summarizer=lambda msgs: model_summarize(msgs))
+ctx.add("user", "task...")
+ctx.add("assistant", "first answer")
+if ctx.is_overloaded():
+    report = ctx.compact()          # old turns -> offload, digest rewritten
+    restored = ctx.restore(limit=5)  # pull the newest back if space allows
+prompt = ctx.history()               # [digest] + surviving turns
+```
+
+---
+
 ## Extending it
 
 - **New input channel?** (Slack, Matrix, a web UI) — you only need to produce a
