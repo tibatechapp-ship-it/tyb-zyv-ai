@@ -54,6 +54,13 @@ bonus fuzz, chaos. Run: `python -m pytest tests/adversarial/ -v`.
 - `src/patterns/` — supervisor, pipeline, fanout, delegation, blackboard.
 - `src/tui/` — app.py (ZyvoTUI, Textual), state.py (TuiState auto-registers
   all 20 when given a backend), screens/ + widgets/.
+- `src/learning/` — experience collector (Phase 1 + 1.5): in-memory, thread-safe
+  buffer of `Experience` (agent_role/action_type/outcome/action/result/ts).
+  `ExperienceCollector.record/all/__len__/clear/stats` + newest-first queries
+  `get_by_agent` / `get_by_action` / `get_by_outcome` / `search(predicate)`
+  (RLock, snapshot reads, limit=50). Docs: `docs/LEARNING.md`. Tests:
+  `tests/test_learning_experience_collector.py`. Long-term storage stays in
+  `src.memory`; the collector is the working in-process buffer (Phase 2 = rules).
 - `src/memory/` — persistent memory, plain SQLite, no deps (6 phases done):
   base.py (connect/MemoryRecord/MemoryStore+RLock/Clock), embeddings.py
   (HashingEmbedder/cosine), episodic.py, semantic.py (optional injectable
@@ -98,6 +105,11 @@ bonus fuzz, chaos. Run: `python -m pytest tests/adversarial/ -v`.
   `export`/`load` aliases. `episode_summaries` table added in `__init__`.
   802 tests, 98.6% cov. NOTE: `compress` summary count accumulates only for
   same-day batches straddling the cutoff (a summary `count` is per (day,agent)).
+- 2026-10-11: `src/learning/` Phase 1 + 1.5 — `ExperienceCollector` (in-memory,
+  thread-safe, injectable clock) + newest-first queries get_by_agent/
+  get_by_action/get_by_outcome/search. NOTE: the user referenced this module as
+  "already done" but it did NOT exist — it was created fresh this session;
+  verify before assuming past work exists. 822 tests (18 new), 98.7% cov.
 - Lesson: pytest `python_classes=Test*` collects agent class `TesterAgent`/alias
   `Tester` → PytestCollectionWarning. Never import `TesterAgent` under a
   Test-prefixed name in tests; use `AGENT_CLASSES` or alias it (e.g. `as QA`).

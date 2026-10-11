@@ -10,6 +10,8 @@ Import layout::
     src.core       → message types, LLM backend protocol, ZYVO HTTP client
     src.agents     → BaseAgent, AgentRegistry, AgentState, AgentMetrics
     src.patterns   → Supervisor, Pipeline, Fanout, Delegation, Blackboard
+    src.memory     → episodic/semantic/procedural/emotional stores + manager
+    src.learning   → ExperienceCollector (what agents did + how it ended)
     src.tui        → terminal UI (Textual app + screens + widgets)
 """
 
