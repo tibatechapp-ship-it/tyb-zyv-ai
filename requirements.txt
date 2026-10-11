@@ -1,0 +1,21 @@
+# tyb-zyv-ai — Python dependencies
+#
+# The core of both assistants is the Python standard library ONLY
+# (urllib, subprocess, threading, ...). Nothing here is required to start —
+# but the packages below enable the best voice experience and are recommended.
+#
+# Install:  pip install -r requirements.txt
+# Skip:     everything still runs, with reduced voice quality (espeak TTS,
+#           and voice-note transcription falls back gracefully to "").
+
+# ── Recommended ────────────────────────────────────────────────────────────
+# Text-to-speech for Telegram voice notes (better Arabic than espeak).
+gTTS>=2.5.0
+
+# Speech-to-text: transcribes incoming Telegram voice notes via Google.
+SpeechRecognition>=3.10.0
+
+# ── Optional ───────────────────────────────────────────────────────────────
+# Termux voice features (termux-tts-speak / termux-speech-to-text) and ffmpeg
+# are native packages, not pip — install them separately:
+#   pkg install termux-api ffmpeg espeak

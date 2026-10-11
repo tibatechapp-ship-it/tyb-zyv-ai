@@ -1,0 +1,50 @@
+[project]
+name = "tyb-zyv-ai"
+version = "1.0.0"
+description = "AI-powered assistants for Termux"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+authors = [{ name = "tibatechapp-ship-it" }]
+keywords = ["termux", "android", "ai", "voice-assistant", "telegram-bot", "zyvo"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: Android",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Terminals",
+    "Topic :: Multimedia :: Sound/Audio :: Speech",
+]
+
+# Core runtime is the Python standard library only. These extras enable the
+# best voice experience (see requirements.txt).
+[project.optional-dependencies]
+voice = ["gTTS>=2.5.0", "SpeechRecognition>=3.10.0"]
+
+# ─── Linting (ruff) ─────────────────────────────────────────────────────────
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+extend-exclude = [".git", "__pycache__"]
+
+[tool.ruff.lint]
+# Same as ruff's default (E4 = imports, E7 = statements, E9 = runtime/syntax,
+# F = pyflakes) — deliberately conservative so every change stays verifiable.
+select = ["E4", "E7", "E9", "F"]
+
+# ─── Type checking (mypy) ───────────────────────────────────────────────────
+[tool.mypy]
+python_version = "3.11"
+# Optional runtime imports (gTTS, speech_recognition) are imported lazily and
+# may be absent — don't fail the build for them.
+ignore_missing_imports = true
+# Both scripts annotate everything, so checking untyped bodies is free.
+check_untyped_defs = true
+# Keep output readable on CI.
+pretty = false
