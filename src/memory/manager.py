@@ -17,17 +17,19 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 import threading
 import time
 import uuid
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from src.memory.base import Clock, connect, default_memory_path, utc_iso
+from src.memory.base import Clock, MemoryRecord, connect, default_memory_path, utc_iso
 from src.memory.embeddings import Embedder, make_embedder
 from src.memory.emotional import EmotionalMemory
-from src.memory.episodic import EpisodicMemory
+from src.memory.episodic import DAY, EpisodicMemory
 from src.memory.procedural import ProceduralMemory
 from src.memory.semantic import SemanticMemory
 
@@ -43,6 +45,47 @@ CREATE TABLE IF NOT EXISTS sessions (
     summary     TEXT NOT NULL DEFAULT ''
 )
 """
+
+_SUMMARIES_SCHEMA = """
+CREATE TABLE IF NOT EXISTS episode_summaries (
+    day            TEXT NOT NULL,
+    agent          TEXT NOT NULL,
+    count          INTEGER NOT NULL DEFAULT 0,
+    errors         INTEGER NOT NULL DEFAULT 0,
+    duration_total REAL NOT NULL DEFAULT 0,
+    PRIMARY KEY (day, agent)
+)
+"""
+
+_SLUG = re.compile(r"[^a-z0-9]+")
+
+#: Query cues that suggest which store a smart :meth:`MemoryManager.recall` uses.
+_SKILL_HINTS = (
+    "how to", "how do", "how do i", "steps", "procedure", "tutorial", "kayfa", "kaif",
+)
+_EPISODE_HINTS = (
+    "what did we", "what have we", "history", "yesterday", "today", "last week",
+    "last month", "timeline", "ams",
+)
+_EMOTION_HINTS = ("prefer", "preference", "feel", "tone", "like my", "style")
+
+_WRITE_SYNONYMS = {
+    "fact": "semantic",
+    "semantic": "semantic",
+    "episode": "episodic",
+    "episodic": "episodic",
+    "skill": "procedural",
+    "procedural": "procedural",
+    "preference": "emotional",
+    "emotional": "emotional",
+}
+
+
+def _slugify(text: str, words: int = 4) -> str:
+    """A short stable key/skill name derived from text (first few words)."""
+    cleaned = _SLUG.sub("_", text.lower()).strip("_")
+    parts = [part for part in cleaned.split("_") if part][:words]
+    return "_".join(parts) or "memory"
 
 
 class MemoryManager:
@@ -69,6 +112,7 @@ class MemoryManager:
         self._current_session: str | None = None
         with self._lock:
             self._connection.execute(_SESSIONS_SCHEMA)
+            self._connection.execute(_SUMMARIES_SCHEMA)
             self._connection.commit()
 
     # -- lifetime ----------------------------------------------------------
@@ -168,6 +212,203 @@ class MemoryManager:
             duration_s=duration_s,
             session_id=self._current_session,
         )
+
+    # -- unified remember / recall / forget --------------------------------
+    def remember(
+        self,
+        content: str,
+        *,
+        kind: str = "auto",
+        key: str | None = None,
+        subject: str = "",
+        source: str = "",
+        agent: str = "assistant",
+        task: str | None = None,
+        result: str = "",
+        ok: bool = True,
+        duration_s: float = 0.0,
+        steps: Sequence[str] = (),
+        tags: Sequence[str] = (),
+        confidence: float = 1.0,
+        **_kwargs: Any,
+    ) -> dict[str, Any]:
+        """Store one memory of any kind, dispatching to the right store.
+
+        ``kind`` is ``"semantic"``, ``"episodic"``, ``"procedural"``,
+        ``"emotional"`` or ``"auto"`` (synonyms like ``"fact"``/``"skill"`` are
+        accepted). With ``"auto"`` the kind is inferred: ``steps`` -> skill,
+        ``task`` -> episode, otherwise a fact. ``content`` is the value (fact),
+        the task text (episode), the description (skill) or the value
+        (preference). Returns ``{"kind", "id"}``.
+        """
+        resolved = self._resolve_write_kind(kind, task=task, steps=steps)
+        if resolved == "episodic":
+            row_id = self.remember_task(
+                agent, task or content, result, ok=ok, duration_s=duration_s
+            )
+        elif resolved == "procedural":
+            row_id = self.procedural.learn(
+                key or _slugify(content), content, steps=steps, tags=tags
+            )
+        elif resolved == "emotional":
+            row_id = self.emotional.set_preference(
+                key or _slugify(content), content, confidence=confidence
+            )
+        else:
+            row_id = self.semantic.remember(
+                key or _slugify(content), content, subject=subject, source=source
+            )
+        return {"kind": resolved, "id": row_id}
+
+    def _resolve_write_kind(
+        self, kind: str, *, task: str | None, steps: Sequence[str]
+    ) -> str:
+        if kind != "auto":
+            return _WRITE_SYNONYMS.get(kind, kind)
+        if steps:
+            return "procedural"
+        if task is not None:
+            return "episodic"
+        return "semantic"
+
+    @staticmethod
+    def _infer_recall_kind(query: str) -> str:
+        lowered = query.lower()
+        if any(cue in lowered for cue in _SKILL_HINTS):
+            return "procedural"
+        if any(cue in lowered for cue in _EPISODE_HINTS):
+            return "episodic"
+        if any(cue in lowered for cue in _EMOTION_HINTS):
+            return "emotional"
+        return "semantic"
+
+    def recall(
+        self, query: str, *, kind: str = "auto", limit: int = 5
+    ) -> dict[str, Any]:
+        """Smart retrieval: pick the right store for ``query`` and search it.
+
+        With ``kind="auto"`` the store is inferred from the question (a *how-to*
+        asks procedural memory, a *what did we do* asks episodic, a *preference*
+        asks emotional, else semantic). Returns ``{"kind", "query", "results"}``.
+        """
+        resolved = self._infer_recall_kind(query) if kind == "auto" else kind
+        resolved = _WRITE_SYNONYMS.get(resolved, resolved)
+        if resolved == "episodic":
+            records = self.episodic.search(query, limit=limit)
+        elif resolved == "procedural":
+            records = self.procedural.find(query, limit=limit)
+        elif resolved == "emotional":
+            records = self._match_preferences(query, limit)
+        else:
+            records = self.semantic.search(query, limit=limit)
+        return {
+            "kind": resolved,
+            "query": query,
+            "results": [record.to_dict() for record in records],
+        }
+
+    def _match_preferences(self, query: str, limit: int) -> list[MemoryRecord]:
+        """Preferences whose key/value shares a word with ``query`` (else all)."""
+        tokens = [token for token in re.split(r"\W+", query.lower()) if len(token) > 2]
+        prefs = self.emotional.preferences()
+        matched = [
+            record
+            for record in prefs
+            if any(
+                token in str(record.data["key"]).lower()
+                or token in str(record.data["value"]).lower()
+                for token in tokens
+            )
+        ]
+        return (matched or prefs)[:limit]
+
+    def forget(self, target: str, *, kind: str = "auto", subject: str = "") -> int:
+        """Remove a memory by key/name; return how many rows were removed."""
+        if kind in {"semantic", "fact"}:
+            return 1 if self.semantic.forget(target, subject=subject) else 0
+        if kind in {"procedural", "skill"}:
+            return 1 if self.procedural.forget(target) else 0
+        removed = 0
+        if self.semantic.forget(target, subject=None):
+            removed += 1
+        if self.procedural.forget(target):
+            removed += 1
+        return removed
+
+    # -- retention & compression ------------------------------------------
+    def retention(
+        self, *, max_age_days: float | None = None, max_episodes: int | None = None
+    ) -> dict[str, int]:
+        """Apply a retention policy to the episodic log; return rows removed.
+
+        * ``max_age_days`` — drop episodes older than this many days;
+        * ``max_episodes`` — keep only the most recent N episodes.
+        """
+        removed = 0
+        if max_age_days is not None:
+            cutoff = self._clock() - float(max_age_days) * DAY
+            cursor = self._execute("DELETE FROM episodes WHERE ts < ?", (cutoff,))
+            removed += cursor.rowcount
+        if max_episodes is not None:
+            cursor = self._execute(
+                """
+                DELETE FROM episodes WHERE id NOT IN (
+                    SELECT id FROM episodes ORDER BY ts DESC, id DESC LIMIT ?
+                )
+                """,
+                (int(max_episodes),),
+            )
+            removed += cursor.rowcount
+        return {"episodes_removed": int(removed)}
+
+    def compress(self, *, older_than_days: float = 30) -> dict[str, int]:
+        """Roll episodes older than the cutoff into per-day summaries.
+
+        Raw episodes are replaced by ``(day, agent)`` summary rows and the
+        database is vacuumed. Returns rows removed / summaries written.
+        """
+        cutoff = self._clock() - float(older_than_days) * DAY
+        with self._lock:
+            groups = list(
+                self._connection.execute(
+                    """
+                    SELECT substr(iso, 1, 10) AS day, agent,
+                           COUNT(*) AS n,
+                           SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) AS errors,
+                           COALESCE(SUM(duration_s), 0) AS total
+                    FROM episodes WHERE ts < ?
+                    GROUP BY day, agent
+                    """,
+                    (cutoff,),
+                ).fetchall()
+            )
+            for row in groups:
+                self._connection.execute(
+                    """
+                    INSERT INTO episode_summaries (day, agent, count, errors, duration_total)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(day, agent) DO UPDATE SET
+                        count = count + excluded.count,
+                        errors = errors + excluded.errors,
+                        duration_total = duration_total + excluded.duration_total
+                    """,
+                    (row["day"], row["agent"], row["n"], row["errors"], row["total"]),
+                )
+            cursor = self._connection.execute("DELETE FROM episodes WHERE ts < ?", (cutoff,))
+            removed = cursor.rowcount
+            self._connection.commit()
+            self._connection.execute("VACUUM")
+        return {"episodes_removed": int(removed), "summaries": len(groups), "vacuumed": 1}
+
+    def summaries(self) -> list[dict[str, Any]]:
+        """Per-day per-agent compressed episode summaries, oldest day first."""
+        with self._lock:
+            rows = list(
+                self._connection.execute(
+                    "SELECT * FROM episode_summaries ORDER BY day ASC, agent ASC"
+                ).fetchall()
+            )
+        return [dict(row) for row in rows]
 
     # -- context bundle ----------------------------------------------------
     def context(
@@ -271,7 +512,22 @@ class MemoryManager:
         counts["satisfaction"] = self._import_satisfaction(data.get("satisfaction", []))
         return counts
 
+    # -- short aliases (the tiny, friendly front door) ---------------------
+    def export(self, path: str | os.PathLike[str]) -> int:
+        """Alias of :meth:`export_json`."""
+        return self.export_json(path)
+
+    def load(self, path: str | os.PathLike[str]) -> dict[str, int]:
+        """Alias of :meth:`import_json`."""
+        return self.import_json(path)
+
     # -- import internals (raw INSERT OR REPLACE, preserving ids) ----------
+    def _execute(self, sql: str, params: Sequence[Any] = ()) -> sqlite3.Cursor:
+        with self._lock:
+            cursor = self._connection.execute(sql, params)
+            self._connection.commit()
+            return cursor
+
     def _executemany(self, sql: str, rows: list[tuple[Any, ...]]) -> int:
         if not rows:
             return 0

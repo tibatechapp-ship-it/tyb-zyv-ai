@@ -12,7 +12,7 @@ src/memory/
 ├── semantic.py    # SemanticMemory   — what is true   (durable facts)
 ├── procedural.py  # ProceduralMemory — how to do things (named skills)
 ├── emotional.py   # EmotionalMemory  — how the user feels (tone/prefs/satisfaction)
-└── manager.py     # MemoryManager    — owns the DB, sessions, context, export/import
+└── manager.py     # MemoryManager    — DB, sessions, context, remember/recall, export
 ```
 
 ## Why four stores
@@ -52,6 +52,50 @@ with MemoryManager() as mem:                 # default DB:
 The database path can be overridden in three ways: pass `path=` to
 `MemoryManager`, set `$ZYVO_MEMORY_DB`, or use the built-in default. `":memory:"`
 gives a throwaway database (great for tests).
+
+## One-word front door — remember / recall / forget
+
+When you do not want to think about *which* store to use, the manager picks it
+for you. `remember()` infers the store from the arguments, `recall()` from the
+question:
+
+```python
+mem.remember("the deploy target is GitHub Pages")          # -> semantic (a fact)
+mem.remember("ship the release", task="ship", steps=["tag", "push"])  # -> procedural
+mem.remember("ran the night build", task="night build")    # -> episodic
+mem.remember("reply terse", kind="preference")             # -> emotional
+
+mem.recall("how do I deploy?")     # "how to"/"steps"  -> procedural memory
+mem.recall("what did we do today?")  # "what did we"   -> episodic memory
+mem.recall("my preference for tone")  # "preference"    -> emotional memory
+mem.recall("deploy target?")        # otherwise        -> semantic memory
+
+mem.forget("deploy")               # drop the key from facts AND skills
+mem.forget("deploy", kind="semantic", subject="ops")   # one store, scoped
+```
+
+`remember` accepts `kind=` (`"auto"` default) with synonyms — `fact`, `episode`,
+`skill`, `preference`. With `"auto"`: `steps=` means a skill, `task=` means an
+episode, otherwise a fact. Every call returns `{"kind", "id"}`. `recall` returns
+`{"kind", "query", "results"}` (list of `MemoryRecord.to_dict()`). Passing an
+explicit `kind=` to either call skips inference.
+
+## Retention & compression
+
+Episodes are the only ever-growing store, so the manager can prune or roll them
+up. `retention()` drops old or excess episodes; `compress()` replaces episodes
+older than a cutoff with per-day weighted summaries (so history survives without
+keeping every row):
+
+```python
+mem.retention(max_age_days=90, max_episodes=10_000)   # -> {"episodes_removed": n}
+mem.compress(older_than_days=30)                      # -> {"episodes_removed", "summaries", "vacuumed"}
+mem.summaries()        # [{"day": "2026-09-01", "agent": "Coder", "count": 42, ...}]
+```
+
+Summaries key on `(day, agent)` and **accumulate** across compress runs, so
+running `compress()` daily keeps folding into the same rows. `compress()` also
+`VACUUM`s the database to reclaim space.
 
 ## The stores in detail
 
@@ -183,8 +227,8 @@ satisfaction: 0.90
 ```python
 mem.stats()                     # {"sessions": 1, "episodes": 2, ...}
 mem.snapshot()                  # full dict of every table (version 1)
-mem.export_json("dump.json")    # -> bytes written
-mem.import_json("dump.json")    # -> rows restored per table (idempotent)
+mem.export_json("dump.json")    # -> bytes written   (alias: mem.export(...))
+mem.import_json("dump.json")    # -> rows restored per table (alias: mem.load(...))
 ```
 
 Import uses `INSERT OR REPLACE` with the original ids, so loading the same
@@ -209,7 +253,8 @@ python -m pytest tests/test_memory_stores.py tests/test_embeddings.py \
   timestamps, no real clock).
 - `tests/test_embeddings.py` — the hashing embedder, cosine and the factory.
 - `tests/test_memory_manager.py` — sessions, context, export/import round-trip,
-  idempotent import, concurrency.
+  idempotent import, concurrency, the unified `remember`/`recall`/`forget` API and
+  retention/compression (including same-day summary accumulation).
 
 The memory package sits at **~99 % coverage**; the whole suite stays above the
 95 % floor.
@@ -219,6 +264,10 @@ The memory package sits at **~99 % coverage**; the whole suite stays above the
 - **Phase 1 (done)** — persistent SQLite stores, sessions, context, export/import.
 - **Phase 2 (done)** — offline embeddings (`HashingEmbedder`) + Top-K cosine
   search (the `embedder` seam), reachable by name or callable.
-- **Phase 3** — richer episodic queries ("what did we do yesterday?") + activity graph.
-- **Phase 4** — procedural skills with context retrieval wiring.
-- **Phase 5** — tone analysis, auto-adjusting replies, satisfaction scoring.
+- **Phase 3 (done)** — richer episodic queries: `activity_graph(days=...)` and
+  `timeline()` alongside `between()` / `for_session()`.
+- **Phase 4 (done)** — procedural skills with `learn` / `find` retrieval and
+  auto-learning (`Skill` / `SkillsRegistry`).
+- **Phase 5 (done)** — tone analysis, auto-adjusting replies, satisfaction scoring.
+- **Phase 6 (done)** — one-word front door (`remember` / `recall` / `forget`),
+  retention policy and episode compression (summaries).

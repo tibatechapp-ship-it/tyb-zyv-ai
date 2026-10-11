@@ -103,11 +103,18 @@ class SemanticMemory(MemoryStore):
         )
         return int(cursor.lastrowid or 0)
 
-    def forget(self, key: str, *, subject: str = "") -> bool:
-        """Delete a fact; return whether one was removed."""
-        cursor = self._execute(
-            "DELETE FROM facts WHERE subject = ? AND key = ?", (subject, key)
-        )
+    def forget(self, key: str, *, subject: str | None = "") -> bool:
+        """Delete a fact; return whether one was removed.
+
+        Pass ``subject=None`` to delete ``key`` under *any* subject (used by the
+        manager's unscoped :meth:`MemoryManager.forget`).
+        """
+        if subject is None:
+            cursor = self._execute("DELETE FROM facts WHERE key = ?", (key,))
+        else:
+            cursor = self._execute(
+                "DELETE FROM facts WHERE subject = ? AND key = ?", (subject, key)
+            )
         return cursor.rowcount > 0
 
     # -- read --------------------------------------------------------------

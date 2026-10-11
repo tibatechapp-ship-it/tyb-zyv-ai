@@ -54,13 +54,15 @@ bonus fuzz, chaos. Run: `python -m pytest tests/adversarial/ -v`.
 - `src/patterns/` — supervisor, pipeline, fanout, delegation, blackboard.
 - `src/tui/` — app.py (ZyvoTUI, Textual), state.py (TuiState auto-registers
   all 20 when given a backend), screens/ + widgets/.
-- `src/memory/` — Phase 1 persistent memory (plain SQLite, no deps): base.py
-  (connect/MemoryRecord/MemoryStore+RLock/Clock), episodic.py, semantic.py
-  (optional injectable `embedder` for cosine search; lexical default),
-  procedural.py, emotional.py (+ bilingual `analyze_tone`), manager.py
-  (MemoryManager: sessions, context bundle, stats, JSON export/import).
-  Docs: `docs/MEMORY.md`. Tests: `tests/test_memory_stores.py`,
-  `tests/test_memory_manager.py`. DB path: `$ZYVO_MEMORY_DB` else
+- `src/memory/` — persistent memory, plain SQLite, no deps (6 phases done):
+  base.py (connect/MemoryRecord/MemoryStore+RLock/Clock), embeddings.py
+  (HashingEmbedder/cosine), episodic.py, semantic.py (optional injectable
+  `embedder` for cosine search; lexical default), procedural.py, emotional.py
+  (+ bilingual `analyze_tone`), manager.py (MemoryManager: sessions, context
+  bundle, stats, JSON export/import + unified `remember`/`recall`/`forget`,
+  `retention`/`compress`/`summaries`). Docs: `docs/MEMORY.md`. Tests:
+  `tests/test_memory_stores.py`, `tests/test_memory_manager.py`,
+  `tests/test_embeddings.py`. DB path: `$ZYVO_MEMORY_DB` else
   `~/.local/share/tyb-zyv-ai/memory.db`; `":memory:"` for tests.
 
 ## Conventions
@@ -88,6 +90,14 @@ bonus fuzz, chaos. Run: `python -m pytest tests/adversarial/ -v`.
   four stores over ONE SQLite DB + MemoryManager (sessions, context, export/
   import). No deps — works on-phone. Semantic search is lexical by default with
   an injectable `embedder` seam for Phase 2. 695 tests, 98.5% cov.
+- 2026-10-11: memory Phase 6 (unified front door) — `MemoryManager.remember`
+  (dispatches by `kind=`/inference: steps→skill, task→episode, else fact),
+  `recall` (infer store from query cues), `forget` (facts+skills, or scoped);
+  `retention`/`compress`/`summaries` (episodes → per-(day,agent) summaries that
+  ACCUMULATE across runs + VACUUM); `semantic.forget(subject=None)` unscoped;
+  `export`/`load` aliases. `episode_summaries` table added in `__init__`.
+  802 tests, 98.6% cov. NOTE: `compress` summary count accumulates only for
+  same-day batches straddling the cutoff (a summary `count` is per (day,agent)).
 - Lesson: pytest `python_classes=Test*` collects agent class `TesterAgent`/alias
   `Tester` → PytestCollectionWarning. Never import `TesterAgent` under a
   Test-prefixed name in tests; use `AGENT_CLASSES` or alias it (e.g. `as QA`).

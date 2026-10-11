@@ -340,6 +340,21 @@ def test_manager_import_recomputes_embeddings(tmp_path):
     assert row is not None and row["embedding"] is not None
 
 
+def test_manager_import_recomputes_skill_embeddings(tmp_path):
+    source = MemoryManager(tmp_path / "a.db", clock=FakeClock())
+    source.procedural.learn("deploy", "ship to github pages", tags=["web"])
+    dump = tmp_path / "dump.json"
+    source.export_json(dump)
+    source.close()
+
+    with MemoryManager(tmp_path / "b.db", embedder="hashing") as mem:
+        mem.import_json(dump)
+        row = mem.connection.execute(
+            "SELECT embedding FROM skills WHERE name = 'deploy'"
+        ).fetchone()
+    assert row is not None and row["embedding"] is not None
+
+
 # --------------------------------------------------------------------------- #
 # concurrency
 # --------------------------------------------------------------------------- #
@@ -359,3 +374,179 @@ def test_concurrent_episode_writes_all_persist(tmp_path):
         assert mem.episodic.count() == 100
     finally:
         mem.close()
+
+
+# --------------------------------------------------------------------------- #
+# unified remember / recall / forget
+# --------------------------------------------------------------------------- #
+def test_remember_auto_infers_kind_from_arguments(manager):
+    mem, _clock = manager
+    assert mem.remember("plain fact about lunch")["kind"] == "semantic"
+    assert mem.remember("deploy the app", task="deploy the app")["kind"] == "episodic"
+    assert mem.remember("cut a release", steps=["tag", "push"])["kind"] == "procedural"
+    assert mem.semantic.count() == 1
+    assert mem.episodic.count() == 1
+    assert mem.procedural.count() == 1
+
+
+def test_remember_accepts_kind_synonyms(manager):
+    mem, _clock = manager
+    assert mem.remember("k1", kind="fact")["kind"] == "semantic"
+    assert mem.remember("k2", kind="skill")["kind"] == "procedural"
+    assert mem.remember("k3", kind="preference")["kind"] == "emotional"
+    assert mem.remember("k4", kind="episode", task="do it")["kind"] == "episodic"
+
+
+def test_remember_explicit_kind_overrides_inference(manager):
+    mem, _clock = manager
+    out = mem.remember("not a skill", kind="semantic", steps=["x"])
+    assert out["kind"] == "semantic"
+    assert mem.procedural.count() == 0
+
+
+def test_recall_auto_picks_store_for_how_to(manager):
+    mem, _clock = manager
+    mem.remember("ship to github pages", steps=["build", "push"])
+    assert mem.recall("how to ship to github pages")["kind"] == "procedural"
+
+
+def test_recall_auto_picks_store_for_history(manager):
+    mem, _clock = manager
+    mem.remember("build the release", task="build the release")
+    assert mem.recall("what did we do yesterday")["kind"] == "episodic"
+
+
+def test_recall_auto_picks_store_for_preference(manager):
+    mem, _clock = manager
+    mem.emotional.set_preference("reply_style", "concise")
+    assert mem.recall("do you know my preference")["kind"] == "emotional"
+
+
+def test_recall_auto_defaults_to_semantic(manager):
+    mem, _clock = manager
+    mem.semantic.remember("deploy", "ship to github pages", subject="ops")
+    answer = mem.recall("deploying to github")
+    assert answer["kind"] == "semantic"
+    assert answer["results"] and answer["results"][0]["data"]["key"] == "deploy"
+
+
+def test_recall_explicit_kind(manager):
+    mem, _clock = manager
+    mem.remember("build the release", task="build the release")
+    answer = mem.recall("build", kind="episodic")
+    assert answer["kind"] == "episodic"
+    assert answer["results"]
+
+
+def test_recall_emotional_falls_back_to_all_preferences(manager):
+    mem, _clock = manager
+    mem.emotional.set_preference("reply_style", "concise")
+    answer = mem.recall("what do you prefer totally unrelated", kind="emotional")
+    assert answer["kind"] == "emotional"
+    assert answer["results"]
+
+
+def test_forget_removes_from_both_default_stores(manager):
+    mem, _clock = manager
+    mem.semantic.remember("deploy", "ship it", subject="ops")
+    mem.procedural.learn("deploy", "ship the app")
+    assert mem.forget("deploy") == 2
+    assert mem.semantic.count() == 0
+    assert mem.procedural.count() == 0
+
+
+def test_forget_scoped_to_one_store(manager):
+    mem, _clock = manager
+    mem.semantic.remember("deploy", "ship it", subject="ops")
+    mem.procedural.learn("deploy", "ship the app")
+    assert mem.forget("deploy", kind="semantic", subject="ops") == 1
+    assert mem.semantic.count() == 0
+    assert mem.procedural.count() == 1
+
+
+def test_forget_scoped_to_procedural_only(manager):
+    mem, _clock = manager
+    mem.semantic.remember("deploy", "ship it", subject="ops")
+    mem.procedural.learn("deploy", "ship the app")
+    assert mem.forget("deploy", kind="skill") == 1     # synonym accepted
+    assert mem.semantic.count() == 1
+    assert mem.procedural.count() == 0
+    assert mem.forget("deploy", kind="procedural") == 0  # already gone
+
+
+def test_forget_missing_target_returns_zero(manager):
+    mem, _clock = manager
+    assert mem.forget("nothing-here") == 0
+
+
+# --------------------------------------------------------------------------- #
+# retention & compression
+# --------------------------------------------------------------------------- #
+def test_retention_max_age_days(manager):
+    mem, clock = manager
+    mem.episodic.record("A", "old", "r")
+    clock.advance(40 * 86_400)
+    mem.episodic.record("A", "fresh", "r")
+    removed = mem.retention(max_age_days=30)
+    assert removed["episodes_removed"] == 1
+    assert [rec.data["task"] for rec in mem.episodic.all()] == ["fresh"]
+
+
+def test_retention_max_episodes_keeps_newest(manager):
+    mem, clock = manager
+    for i in range(5):
+        mem.episodic.record("A", f"t{i}", "r")
+        clock.advance(60)
+    removed = mem.retention(max_episodes=2)
+    assert removed["episodes_removed"] == 3
+    assert [rec.data["task"] for rec in mem.episodic.all()] == ["t3", "t4"]
+
+
+def test_compress_rolls_episodes_into_summaries(manager):
+    mem, clock = manager
+    mem.episodic.record("A", "old-1", "r", duration_s=0.5)
+    mem.episodic.record("A", "old-2", "r", ok=False, duration_s=0.5)
+    clock.advance(40 * 86_400)
+    mem.episodic.record("A", "fresh", "r")
+    out = mem.compress(older_than_days=30)
+    assert out["episodes_removed"] == 2
+    assert out["summaries"] == 1
+    assert mem.episodic.count() == 1
+    rows = mem.summaries()
+    assert len(rows) == 1
+    assert rows[0]["agent"] == "A"
+    assert rows[0]["count"] == 2
+    assert rows[0]["errors"] == 1
+    assert rows[0]["duration_total"] == pytest.approx(1.0)
+
+
+def test_compress_accumulates_across_runs(manager):
+    mem, clock = manager
+    # Two episodes on the SAME calendar day (T0 is mid-day) straddling the cutoff:
+    # the first compress rolls only batch-1, the second folds batch-2 into the
+    # same (day, agent) summary row -> counts must ADD, not overwrite.
+    mem.episodic.record("A", "batch-1", "r")     # T0
+    clock.advance(3_600)                          # +1h, still the same UTC day
+    mem.episodic.record("A", "batch-2", "r")
+    clock.advance(30 * 86_400)                    # cutoff lands between the two
+    mem.compress(older_than_days=30)
+    assert mem.summaries()[0]["count"] == 1
+    clock.advance(3_600)                          # cutoff now past batch-2
+    mem.compress(older_than_days=30)
+    rows = mem.summaries()
+    assert len(rows) == 1
+    assert rows[0]["count"] == 2
+    assert rows[0]["agent"] == "A"
+
+
+def test_export_load_aliases_round_trip(tmp_path, manager):
+    mem, _clock = manager
+    mem.remember("ship it", kind="semantic", subject="ops", key="deploy")
+    mem.remember("do the release", task="do the release", kind="episodic")
+    dump = tmp_path / "dump.json"
+    assert mem.export(dump) > 0
+
+    with MemoryManager(tmp_path / "fresh.db") as clone:
+        counts = clone.load(dump)
+        assert counts["facts"] == 1
+        assert counts["episodes"] == 1
