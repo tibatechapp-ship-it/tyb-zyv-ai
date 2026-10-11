@@ -97,6 +97,21 @@ bonus fuzz, chaos. Run: `python -m pytest tests/adversarial/ -v`.
   (extracted/kept/dropped/lessons + to_dict). Source priority: explicit
   experiences > task's experiences (oldest-first) > all. Tests:
   `tests/test_learning_orchestrator.py`.
+- `src/learning/manager.py` — Phase 5 `ContinualLearningManager(collector,
+  extractor, store, *, orchestrator=, validator=, min_confidence=0.5, clock=)`
+  runs the loop collect→extract→validate→merge. `learn(experiences=None)`
+  incremental over a collector index cursor (explicit batch leaves cursor
+  untouched); extract via orchestrator `store_results=False`; validate via
+  pluggable `validator(lesson)->bool` (default: conf ≥ floor AND non-blank
+  principle); merge via new `LessonStore.merge()` (similar principle → union
+  evidence/tags, re-scored conf, fresh id REPLACES old entry; else add).
+  `schedule(every_experiences=10, every_seconds=0)` → `SchedulePolicy` (due when
+  either trigger fires; both-zero → ValueError), `due()`/`run_due()`/
+  `unschedule()`, `pending()`, `history`. Returns `LearningCycle` (collected/
+  extracted/validated/merged/added/dropped/lessons/duration + to_dict).
+  `lesson.py` now exposes module-level `principles_similar`/`merge_lessons`/
+  `blend_confidence` (extractor delegates to them; store reuses them). Tests:
+  `tests/test_learning_manager.py`.
 - `src/tui/screens/lessons.py` — Phase 4 `LessonsScreen` (ModalBase): table of
   confidence/principle/agent/evidence/tags, text filter input, confidence
   keys 1–4. Opened by `ZyvoTUI.action_show_lessons` (ctrl+l app binding,
@@ -174,6 +189,12 @@ bonus fuzz, chaos. Run: `python -m pytest tests/adversarial/ -v`.
   store in one call; drops lessons with confidence < 0.5) + `LessonDatabase`
   (SQLite persistence, PRAGMA user_version, upsert by id) + TUI `LessonsScreen`
   (ctrl+l / :lessons; text + confidence filters). `TuiState.lesson_store`.
+- 2026-10-11: learning Phase 5 — `ContinualLearningManager` runs the loop
+  collect→extract→validate→merge (incremental cursor; pluggable validator;
+  `LessonStore.merge()` consolidates recurring principles instead of duplicating)
+  with automatic scheduling (`schedule`/`due`/`run_due`). `lesson.py` similarity/
+  merge/confidence logic lifted to module-level helpers, reused by the store.
+  948 tests, 98.96% cov.
 - Lesson: pytest `python_classes=Test*` collects agent class `TesterAgent`/alias
   `Tester` → PytestCollectionWarning. Never import `TesterAgent` under a
   Test-prefixed name in tests; use `AGENT_CLASSES` or alias it (e.g. `as QA`).

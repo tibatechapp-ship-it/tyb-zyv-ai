@@ -309,3 +309,51 @@ The TUI has a **Lessons** modal showing every lesson in the app's store:
 
 `TuiState` owns the store (`state.lesson_store`) and accepts a pre-populated one
 via `TuiState(..., lesson_store=store)` — e.g. one loaded from SQLite at startup.
+
+## The learning loop (Phase 5) — `ContinualLearningManager`
+
+Phase 4's orchestrator learns **when you ask it to**. Phase 5 makes learning
+**continuous**: a manager drives the whole loop and can run it automatically.
+
+    collect  →  extract  →  validate  →  merge
+
+```python
+from src.learning import ContinualLearningManager, LessonExtractor, ...
+
+manager = ContinualLearningManager(collector, extractor, store)
+
+# one cycle, on demand (incremental: only NEW experiences since last time)
+cycle = manager.learn()
+# -> LearningCycle(collected=4, extracted=3, validated=3, merged=1, added=2, ...)
+
+# or let it run itself — poll run_due() from a TUI tick / task hook
+manager.schedule(every_experiences=10, every_seconds=300)   # either trigger
+manager.run_due()   # runs a cycle only when enough new work has piled up
+```
+
+**The four steps:**
+
+* **collect** — pulls only the experiences recorded since the previous cycle (an
+  index cursor over the collector). Pass `learn(experiences=[...])` to run on an
+  explicit batch instead; the cursor is left untouched.
+* **extract** — delegates to the `LearningOrchestrator` in `store_results=False`
+  mode, so the manager owns what gets written.
+* **validate** — a pluggable `validator(lesson) -> bool`. The default keeps a
+  lesson only if its confidence ≥ `min_confidence` (0.5) **and** its principle is
+  non-blank.
+* **merge** — folds each survivor into the store via `LessonStore.merge()`: a
+  recurring principle (token Jaccard ≥ 0.6, or exact match) merges into the
+  existing entry — evidence and tags union, confidence is re-scored with a
+  contradiction penalty, and a fresh id replaces the old one. A novel principle
+  is added as-is.
+
+**Scheduling:** `schedule(every_experiences=10, every_seconds=0)` installs a
+`SchedulePolicy`; a cycle is due once **either** N new experiences have piled up
+**or** T seconds have elapsed since the last cycle (whichever fires first).
+`due()` asks whether a cycle should run now, `run_due()` runs it if so (else
+returns `None`), and `unschedule()` clears it. `pending()` reports how many
+experiences are awaiting the next cycle, and `history` keeps every `LearningCycle`
+run so far.
+
+`LearningCycle.merged` vs `.added` tell you how much was genuinely new versus
+consolidated — the health signal of continual learning.

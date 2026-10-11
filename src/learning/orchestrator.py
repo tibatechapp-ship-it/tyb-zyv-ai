@@ -78,6 +78,7 @@ class LearningOrchestrator:
         task_id: str | None = None,
         experiences: Sequence[Experience] | None = None,
         min_confidence: float | None = None,
+        store_results: bool = True,
     ) -> ExtractionReport:
         """Extract, filter and store lessons in a single call.
 
@@ -86,12 +87,16 @@ class LearningOrchestrator:
         (oldest first), else **every** collected experience. Lessons scoring
         below ``min_confidence`` (defaults to the orchestrator's own floor) are
         dropped before storing.
+
+        Pass ``store_results=False`` to get the filtered lessons **without**
+        writing them to the store — the :class:`ContinualLearningManager` uses
+        this to run its own validate/merge step before persisting.
         """
         threshold = self._min_confidence if min_confidence is None else min_confidence
         source = self._resolve_source(task_id, experiences)
         lessons = self._extractor.extract_batch(source)
         kept = [lesson for lesson in lessons if lesson.confidence >= threshold]
-        if kept:
+        if kept and store_results:
             self._store.add_many(kept)
         return ExtractionReport(
             extracted=len(lessons),

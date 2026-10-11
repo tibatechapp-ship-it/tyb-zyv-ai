@@ -35,7 +35,13 @@ from src.core.backend import LLMBackend
 from src.core.types import Message
 from src.learning.experience_collector import Experience, ExperienceCollector, Outcome
 
-__all__ = ["Lesson", "LessonExtractor"]
+__all__ = [
+    "Lesson",
+    "LessonExtractor",
+    "blend_confidence",
+    "merge_lessons",
+    "principles_similar",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +79,53 @@ _TOKEN = re.compile(r"[a-z0-9]+")
 def _tokenize(text: str) -> frozenset[str]:
     """Lowercase word tokens of ``text`` (used for similarity)."""
     return frozenset(_TOKEN.findall(text.lower()))
+
+
+def principles_similar(left: str, right: str) -> bool:
+    """Whether two principle strings are similar enough to be merged.
+
+    Similarity is token Jaccard at or above :data:`_SIMILARITY_THRESHOLD`; two
+    blank (tokenless) strings are similar only when textually identical.
+    """
+    left_tokens, right_tokens = _tokenize(left), _tokenize(right)
+    if not left_tokens or not right_tokens:
+        return left.strip().lower() == right.strip().lower()
+    if left_tokens == right_tokens:
+        return True
+    union = left_tokens | right_tokens
+    return len(left_tokens & right_tokens) / len(union) >= _SIMILARITY_THRESHOLD
+
+
+def blend_confidence(base: float, evidence_count: int, contradictory: bool) -> float:
+    """Re-score confidence from ``base``, support count and contradiction flag."""
+    confidence = base + min(_REPETITION_CAP, max(0, evidence_count - 1) * _REPETITION_STEP)
+    if contradictory:
+        confidence -= _CONTADICTION_PENALTY
+    return round(min(1.0, max(0.0, confidence)), 3)
+
+
+def merge_lessons(group: Sequence[Lesson]) -> Lesson:
+    """Merge similar lessons into one: union evidence/tags, dominant labels.
+
+    ``source_outcome``/``agent_role`` take the most common value (ties broken by
+    first-seen); confidence is re-scored with a contradiction penalty when the
+    group disagrees on outcome; the result is stamped with a fresh id.
+    """
+    evidence = tuple(dict.fromkeys(item for lesson in group for item in lesson.evidence))
+    outcomes = [lesson.source_outcome for lesson in group]
+    contradictory = len(set(outcomes)) > 1
+    base = max(lesson.confidence for lesson in group)
+    return Lesson(
+        id=uuid.uuid4().hex,
+        principle=group[0].principle,
+        context=group[0].context,
+        confidence=blend_confidence(base, len(evidence), contradictory),
+        evidence=evidence,
+        source_outcome=Counter(outcomes).most_common(1)[0][0],
+        created_at=max(lesson.created_at for lesson in group),
+        agent_role=Counter(item.agent_role for item in group).most_common(1)[0][0],
+        tags=frozenset(tag for lesson in group for tag in lesson.tags),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -258,37 +311,12 @@ class LessonExtractor:
 
     @staticmethod
     def _similar(left: str, right: str) -> bool:
-        left_tokens, right_tokens = _tokenize(left), _tokenize(right)
-        if not left_tokens or not right_tokens:
-            return left.strip().lower() == right.strip().lower()
-        if left_tokens == right_tokens:
-            return True
-        union = left_tokens | right_tokens
-        return len(left_tokens & right_tokens) / len(union) >= _SIMILARITY_THRESHOLD
+        return principles_similar(left, right)
 
     def _merge(self, group: list[Lesson]) -> Lesson:
-        evidence = tuple(dict.fromkeys(key for lesson in group for key in lesson.evidence))
-        outcomes = [lesson.source_outcome for lesson in group]
-        source_outcome = Counter(outcomes).most_common(1)[0][0]
-        agent_role = Counter(lesson.agent_role for lesson in group).most_common(1)[0][0]
-        contradictory = len(set(outcomes)) > 1
-        base = max(lesson.confidence for lesson in group)
-        return Lesson(
-            id=uuid.uuid4().hex,
-            principle=group[0].principle,
-            context=group[0].context,
-            confidence=self._confidence(base, len(evidence), contradictory),
-            evidence=evidence,
-            source_outcome=source_outcome,
-            created_at=max(lesson.created_at for lesson in group),
-            agent_role=agent_role,
-            tags=frozenset(tag for lesson in group for tag in lesson.tags),
-        )
+        return merge_lessons(group)
 
     @staticmethod
     def _confidence(base: float, evidence_count: int, contradictory: bool) -> float:
         """Blend the model's confidence with the support behind the lesson."""
-        confidence = base + min(_REPETITION_CAP, max(0, evidence_count - 1) * _REPETITION_STEP)
-        if contradictory:
-            confidence -= _CONTADICTION_PENALTY
-        return round(min(1.0, max(0.0, confidence)), 3)
+        return blend_confidence(base, evidence_count, contradictory)

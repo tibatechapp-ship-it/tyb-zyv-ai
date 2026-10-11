@@ -17,6 +17,11 @@ lessons against a task and fold the relevant ones into an agent's prompt
 Phase 4 — :class:`LearningOrchestrator` runs the whole pipeline
 (collector → extractor → store) in one call and drops weak lessons, while
 :class:`LessonDatabase` persists lessons to SQLite.
+
+Phase 5 — :class:`ContinualLearningManager` coordinates the full learning loop
+(collect → extract → validate → merge) and can run it automatically
+(:meth:`~ContinualLearningManager.schedule` + :meth:`~ContinualLearningManager.run_due`),
+merging recurring lessons into existing store entries instead of duplicating.
 """
 
 from __future__ import annotations
@@ -37,6 +42,12 @@ from src.learning.lesson_store import (
     default_lesson_db_path,
     render_lessons,
 )
+from src.learning.manager import (
+    ContinualLearningManager,
+    LearningCycle,
+    LessonValidator,
+    SchedulePolicy,
+)
 from src.learning.orchestrator import (
     DEFAULT_MIN_CONFIDENCE,
     ExtractionReport,
@@ -48,6 +59,7 @@ __all__ = [
     "DEFAULT_MIN_CONFIDENCE",
     "KNOWN_ACTION_TYPES",
     "KNOWN_AGENT_ROLES",
+    "ContinualLearningManager",
     "Experience",
     "ExperienceCollector",
     "ExtractionReport",
@@ -56,8 +68,11 @@ __all__ = [
     "LessonExtractor",
     "LessonInjector",
     "LessonStore",
+    "LessonValidator",
+    "LearningCycle",
     "LearningOrchestrator",
     "Outcome",
+    "SchedulePolicy",
     "default_lesson_db_path",
     "render_lessons",
 ]

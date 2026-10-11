@@ -40,7 +40,7 @@ from typing import Any, Protocol
 
 from src.core.types import AgentResult
 from src.learning.experience_collector import Outcome
-from src.learning.lesson import Lesson, _tokenize
+from src.learning.lesson import Lesson, _tokenize, merge_lessons, principles_similar
 from src.memory.base import connect
 
 __all__ = [
@@ -266,6 +266,26 @@ class LessonStore:
             self.add(lesson)
             count += 1
         return count
+
+    def merge(self, lesson: Lesson) -> Lesson:
+        """Fold ``lesson`` into the store against a similar existing lesson.
+
+        If a stored lesson has a similar principle (token Jaccard ≥ 0.6) the two
+        are merged — union evidence/tags, re-scored confidence, fresh id — and
+        the merged lesson replaces the old entry. Otherwise ``lesson`` is added
+        as-is. Returns the resulting (stored) lesson; a changed id signals a
+        merge, an unchanged id signals a plain add.
+        """
+        with self._lock:
+            for existing in self._lessons:
+                if principles_similar(existing.principle, lesson.principle):
+                    merged = merge_lessons([existing, lesson])
+                    index = self._lessons.index(existing)
+                    self._lessons[index] = merged
+                    del self._by_id[existing.id]
+                    self._by_id[merged.id] = merged
+                    return merged
+            return self.add(lesson)
 
     def remove(self, lesson_id: str) -> bool:
         """Remove a lesson by id; returns whether it existed."""
