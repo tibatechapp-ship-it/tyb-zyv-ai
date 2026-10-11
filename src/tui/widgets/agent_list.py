@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from rich.table import Table
 from rich.text import Text
 from textual.widgets import Static
@@ -29,7 +31,7 @@ class AgentListPanel(Static):
     }
     """
 
-    def __init__(self, registry: AgentRegistry, **kwargs: object) -> None:
+    def __init__(self, registry: AgentRegistry, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self._registry = registry
 

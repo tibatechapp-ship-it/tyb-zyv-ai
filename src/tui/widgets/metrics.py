@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from rich.table import Table
 from textual.widgets import Static
 
@@ -13,7 +15,7 @@ __all__ = ["MetricsPanel"]
 class MetricsPanel(Static):
     """Shows a snapshot of the host machine's vital signs."""
 
-    def __init__(self, llm_calls: int = 0, **kwargs: object) -> None:
+    def __init__(self, llm_calls: int = 0, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self._llm_calls = llm_calls
 

@@ -55,7 +55,7 @@ class ZyvoTUI(App[None]):
     def action_show_help(self) -> None:
         self.push_screen(HelpScreen())
 
-    def action_quit(self) -> None:
+    async def action_quit(self) -> None:
         self.exit()
 
 

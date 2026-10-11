@@ -29,7 +29,7 @@ def load_average() -> tuple[float, float, float] | None:
         return None
 
 
-def memory() -> dict[str, int]:
+def memory() -> dict[str, int | float]:
     """Memory in kB from ``/proc/meminfo`` (empty dict if unavailable)."""
     info: dict[str, int] = {}
     try:

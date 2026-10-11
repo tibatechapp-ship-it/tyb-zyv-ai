@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import TYPE_CHECKING, cast
 
 from textual.app import ComposeResult
@@ -65,13 +66,13 @@ class DashboardScreen(Screen[None]):
             self._run_default(command.text)
 
     def _run_ui_command(self, name: str) -> None:
-        dispatch = {
+        dispatch: dict[str, Callable[[], None]] = {
             "agents": self.zyvo.action_show_agents,
             "tasks": self.zyvo.action_show_tasks,
             "monitor": self.zyvo.action_show_monitor,
             "logs": self.zyvo.action_show_logs,
             "help": self.zyvo.action_show_help,
-            "quit": self.zyvo.action_quit,
+            "quit": self.zyvo.exit,
         }
         handler = dispatch.get(name)
         if handler is None:
