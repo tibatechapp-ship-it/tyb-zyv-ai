@@ -55,12 +55,16 @@ bonus fuzz, chaos. Run: `python -m pytest tests/adversarial/ -v`.
 - `src/tui/` — app.py (ZyvoTUI, Textual), state.py (TuiState auto-registers
   all 20 when given a backend), screens/ + widgets/.
 - `src/learning/` — experience collector (Phase 1 + 1.5): in-memory, thread-safe
-  buffer of `Experience` (agent_role/action_type/outcome/action/result/ts).
-  `ExperienceCollector.record/all/__len__/clear/stats` + newest-first queries
-  `get_by_agent` / `get_by_action` / `get_by_outcome` / `search(predicate)`
-  (RLock, snapshot reads, limit=50). Docs: `docs/LEARNING.md`. Tests:
-  `tests/test_learning_experience_collector.py`. Long-term storage stays in
-  `src.memory`; the collector is the working in-process buffer (Phase 2 = rules).
+  buffer of `Experience` (task_id/step_id/agent_role/action_type/outcome/action/
+  result/ts). Canonical lowercase names only — `KNOWN_AGENT_ROLES` (20) +
+  `KNOWN_ACTION_TYPES` (10); fail-safe `record()` raises ValueError + logs
+  warning. `stats()` (rates + Counter.most_common desc + time_range),
+  export/import JSON + JSONL (invalid items skipped w/ warning),
+  `prune(max_age_days, max_count)` / `prune_by_outcome(outcome, max_count)`.
+  Queries: `get_by_agent` / `get_by_action` / `get_by_outcome` / `search(...)`
+  (newest-first, limit=50, RLock snapshots). Docs: `docs/LEARNING.md`. Tests:
+  `tests/test_learning_experience_collector.py` (43). Long-term storage stays
+  in `src.memory`; the collector is the working in-process buffer.
 - `src/memory/` — persistent memory, plain SQLite, no deps (6 phases done):
   base.py (connect/MemoryRecord/MemoryStore+RLock/Clock), embeddings.py
   (HashingEmbedder/cosine), episodic.py, semantic.py (optional injectable
@@ -110,6 +114,12 @@ bonus fuzz, chaos. Run: `python -m pytest tests/adversarial/ -v`.
   get_by_action/get_by_outcome/search. NOTE: the user referenced this module as
   "already done" but it did NOT exist — it was created fresh this session;
   verify before assuming past work exists. 822 tests (18 new), 98.7% cov.
+- 2026-10-11: learning Phase 1.5 completed (2nd round): `record()` now takes
+  task_id/step_id and FAILS on blank ids or roles/actions outside
+  KNOWN_AGENT_ROLES/KNOWN_ACTION_TYPES (ValueError + logger warning; canonical
+  lowercase only); `stats()` → rates + Counter desc + time_range;
+  export/import JSON + JSONL (invalid items skipped, never fatal);
+  prune/prune_by_outcome retention. 847 tests, ~98.7% cov.
 - Lesson: pytest `python_classes=Test*` collects agent class `TesterAgent`/alias
   `Tester` → PytestCollectionWarning. Never import `TesterAgent` under a
   Test-prefixed name in tests; use `AGENT_CLASSES` or alias it (e.g. `as QA`).
