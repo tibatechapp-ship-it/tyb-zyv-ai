@@ -112,6 +112,20 @@ bonus fuzz, chaos. Run: `python -m pytest tests/adversarial/ -v`.
   `lesson.py` now exposes module-level `principles_similar`/`merge_lessons`/
   `blend_confidence` (extractor delegates to them; store reuses them). Tests:
   `tests/test_learning_manager.py`.
+- `src/learning/anti_forgetting.py` — Phase 6 `AntiForgetting(store, *,
+  protection_threshold=0.8, min_evidence=3, protect=, topic_threshold=0.5)`:
+  guards against catastrophic forgetting. **Protection** — `protect`/`unprotect`/
+  `is_protected` (explicit id OR `protect` predicate OR value rule: conf ≥
+  threshold AND ≥ min_evidence) + `protect_valuable()`. **Conflict detection** —
+  same topic (Jaccard ≥ 0.5 over NON-polarity tokens) but opposite polarity
+  (always/never via `_NEGATIVE`/`_POSITIVE`) → `Conflict`; `consolidate()` stores
+  it ALONGSIDE (never overwrites). **Sparse merge** — `consolidate(lesson)` →
+  `ConsolidationResult(lesson, action=added|merged|conflict, conflict)`, touching
+  only the related entry; preserves protected status through a merge.
+  `reinforce(id, amount=0.1)` (spaced repetition), `resolve(conflict,
+  keep=confident|existing|incoming)` (never drops a protected lesson), `conflicts`
+  property. Manager takes optional `anti_forgetting=` and reports `conflicts` on
+  `LearningCycle`. Tests: `tests/test_learning_anti_forgetting.py`.
 - `src/tui/screens/lessons.py` — Phase 4 `LessonsScreen` (ModalBase): table of
   confidence/principle/agent/evidence/tags, text filter input, confidence
   keys 1–4. Opened by `ZyvoTUI.action_show_lessons` (ctrl+l app binding,
@@ -195,6 +209,13 @@ bonus fuzz, chaos. Run: `python -m pytest tests/adversarial/ -v`.
   with automatic scheduling (`schedule`/`due`/`run_due`). `lesson.py` similarity/
   merge/confidence logic lifted to module-level helpers, reused by the store.
   948 tests, 98.96% cov.
+- 2026-10-11: learning Phase 6 — `AntiForgetting` (protection + conflict
+  detection + sparse merge) guards the store: protected/valuable lessons keep
+  identity through merges, opposite-polarity ("always" vs "never") lessons on the
+  same topic are stored alongside (not overwritten) as conflicts, and
+  consolidation touches only the related entry. Manager gains `anti_forgetting=`
+  + `LearningCycle.conflicts`. Added `if TYPE_CHECKING:` to coverage
+  `exclude_lines`. 977 tests, 99.04% cov.
 - Lesson: pytest `python_classes=Test*` collects agent class `TesterAgent`/alias
   `Tester` → PytestCollectionWarning. Never import `TesterAgent` under a
   Test-prefixed name in tests; use `AGENT_CLASSES` or alias it (e.g. `as QA`).

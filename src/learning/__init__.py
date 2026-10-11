@@ -26,6 +26,12 @@ merging recurring lessons into existing store entries instead of duplicating.
 
 from __future__ import annotations
 
+from src.learning.anti_forgetting import (
+    AntiForgetting,
+    Conflict,
+    ConsolidationResult,
+    polarity,
+)
 from src.learning.experience_collector import (
     DAY,
     KNOWN_ACTION_TYPES,
@@ -59,6 +65,9 @@ __all__ = [
     "DEFAULT_MIN_CONFIDENCE",
     "KNOWN_ACTION_TYPES",
     "KNOWN_AGENT_ROLES",
+    "AntiForgetting",
+    "Conflict",
+    "ConsolidationResult",
     "ContinualLearningManager",
     "Experience",
     "ExperienceCollector",
@@ -74,5 +83,6 @@ __all__ = [
     "Outcome",
     "SchedulePolicy",
     "default_lesson_db_path",
+    "polarity",
     "render_lessons",
 ]

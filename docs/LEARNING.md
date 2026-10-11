@@ -357,3 +357,40 @@ run so far.
 
 `LearningCycle.merged` vs `.added` tell you how much was genuinely new versus
 consolidated — the health signal of continual learning.
+
+## Anti-forgetting (Phase 6) — protecting the core
+
+A store that lives for months accumulates noise, and a naive merge can silently
+wash out an important lesson. `AntiForgetting` sits between the learner and the
+store and adds three protections:
+
+```python
+from src.learning import AntiForgetting
+
+anti = AntiForgetting(store, protection_threshold=0.8, min_evidence=3)
+manager = ContinualLearningManager(
+    collector, extractor, store, anti_forgetting=anti,
+)
+```
+
+* **Protection** — a lesson is *protected* if it is explicitly pinned
+  (`anti.protect(id)`), matches an injected `protect=lesson->bool` predicate, or
+  simply clears the value rule (confidence ≥ `protection_threshold` **and**
+  ≥ `min_evidence` supporting experiences). `protect_valuable()` pins the whole
+  current core set at once. A protected lesson keeps its identity through every
+  merge — its confidence is never silently traded away.
+* **Conflict detection** — an incoming lesson that is topically the same as an
+  existing one but has the **opposite polarity** ("never X" vs "always X", over
+  the non-polarity tokens, Jaccard ≥ 0.5) is reported as a `Conflict` and stored
+  **alongside** — the existing lesson is left untouched, so meaning is never
+  collapsed. `anti.conflicts` lists everything found; `anti.resolve(conflict,
+  keep="confident"|"existing"|"incoming")` drops one side (never a protected one).
+* **Sparse updates** — `consolidate(lesson)` touches **only** the entry the
+  incoming lesson relates to (merge) or adds a new one; every unrelated lesson
+  stays byte-for-byte identical. It returns a `ConsolidationResult` with an
+  `action` of `"added"`, `"merged"` or `"conflict"`.
+
+`reinforce(lesson_id, amount=0.1)` nudges a lesson's confidence upward (spaced
+repetition, clamped at 1.0). When the manager runs with a layer the cycle's
+`conflicts` count reflects contradictions found during that cycle.
+

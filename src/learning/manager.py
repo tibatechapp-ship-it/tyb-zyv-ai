@@ -25,12 +25,15 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from threading import RLock
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.learning.experience_collector import Experience, ExperienceCollector
 from src.learning.lesson import Lesson, LessonExtractor
 from src.learning.lesson_store import LessonStore
 from src.learning.orchestrator import DEFAULT_MIN_CONFIDENCE, LearningOrchestrator
+
+if TYPE_CHECKING:
+    from src.learning.anti_forgetting import AntiForgetting
 
 __all__ = [
     "ContinualLearningManager",
@@ -75,6 +78,7 @@ class LearningCycle:
     dropped: int
     lessons: tuple[Lesson, ...]
     duration: float
+    conflicts: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         """A JSON-serialisable view of this cycle."""
@@ -85,6 +89,7 @@ class LearningCycle:
             "merged": self.merged,
             "added": self.added,
             "dropped": self.dropped,
+            "conflicts": self.conflicts,
             "lessons": [lesson.to_dict() for lesson in self.lessons],
             "duration": self.duration,
         }
@@ -101,6 +106,7 @@ class ContinualLearningManager:
         *,
         orchestrator: LearningOrchestrator | None = None,
         validator: LessonValidator | None = None,
+        anti_forgetting: AntiForgetting | None = None,
         min_confidence: float = DEFAULT_MIN_CONFIDENCE,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
@@ -111,6 +117,7 @@ class ContinualLearningManager:
             collector, extractor, store, min_confidence=min_confidence
         )
         self._validator = validator or self._passes_default_validation
+        self._anti_forgetting = anti_forgetting
         self._min_confidence = min_confidence
         self._clock = clock
         self._cursor = 0
@@ -129,6 +136,11 @@ class ContinualLearningManager:
     def orchestrator(self) -> LearningOrchestrator:
         """The orchestrator driving the extract step."""
         return self._orchestrator
+
+    @property
+    def anti_forgetting(self) -> AntiForgetting | None:
+        """The anti-forgetting layer guarding the store, if any."""
+        return self._anti_forgetting
 
     @property
     def policy(self) -> SchedulePolicy | None:
@@ -167,14 +179,25 @@ class ContinualLearningManager:
             validated: list[Lesson] = []
             merged = 0
             added = 0
+            conflicts = 0
             for lesson in report.lessons:
                 if not self._validator(lesson):
                     continue
-                stored = self._store.merge(lesson)
-                if stored.id == lesson.id:
-                    added += 1
+                if self._anti_forgetting is not None:
+                    result = self._anti_forgetting.consolidate(lesson)
+                    stored = result.lesson
+                    if result.action == "merged":
+                        merged += 1
+                    elif result.action == "conflict":
+                        conflicts += 1
+                    else:
+                        added += 1
                 else:
-                    merged += 1
+                    stored = self._store.merge(lesson)
+                    if stored.id == lesson.id:
+                        added += 1
+                    else:
+                        merged += 1
                 validated.append(stored)
             cycle = LearningCycle(
                 collected=len(collected),
@@ -185,6 +208,7 @@ class ContinualLearningManager:
                 dropped=report.dropped + (report.kept - len(validated)),
                 lessons=tuple(validated),
                 duration=round(self._clock() - start, 6),
+                conflicts=conflicts,
             )
             return self._record(cycle)
 
