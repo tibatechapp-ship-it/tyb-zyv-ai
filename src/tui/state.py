@@ -9,6 +9,7 @@ from src.agents import all_agents
 from src.agents.registry import AgentRegistry
 from src.core.backend import LLMBackend
 from src.core.types import AgentResult
+from src.learning import LessonStore
 
 __all__ = ["TaskRecord", "TuiState"]
 
@@ -34,12 +35,21 @@ class TaskRecord:
 class TuiState:
     """Holds everything the views render: registry, tasks, logs, counters."""
 
-    def __init__(self, registry: AgentRegistry | None = None, backend: LLMBackend | None = None) -> None:
+    def __init__(
+        self,
+        registry: AgentRegistry | None = None,
+        backend: LLMBackend | None = None,
+        *,
+        lesson_store: LessonStore | None = None,
+    ) -> None:
         # No registry given but a backend is: auto-register the 20 built-ins.
         if registry is None:
             registry = AgentRegistry(all_agents(backend)) if backend is not None else AgentRegistry()
         self.registry = registry
         self.backend = backend
+        # The learned principles shown in the Lessons view. Empty by default;
+        # callers can hand in a pre-populated store (e.g. loaded from SQLite).
+        self.lesson_store = lesson_store if lesson_store is not None else LessonStore()
         self.tasks: list[TaskRecord] = []
         self.logs: list[dict[str, str]] = []
         self.llm_calls = 0

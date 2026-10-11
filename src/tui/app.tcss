@@ -50,6 +50,7 @@ Screen {
 #tasks-modal,
 #monitor-modal,
 #logs-modal,
+#lessons-modal,
 #help-modal {
     width: 80%;
     height: auto;

@@ -7,11 +7,18 @@ ones relevant to a task; :func:`render_lessons` formats them as a prompt block;
 :class:`LessonInjector` wires that block into any agent's run loop (the block is
 fused into the **user turn**, never the persona — same rule as context).
 
+Phase 4 adds **durable persistence**: :class:`LessonDatabase` is a small SQLite
+wrapper (one ``lessons`` table) and :meth:`LessonStore.save_to_db` /
+:meth:`LessonStore.load_from_db` move lessons to and from it (with a versioned
+:meth:`LessonDatabase.migrate_schema`). The in-memory store stays the fast
+working copy; the database is the durable record.
+
 Design notes:
 
 * the store is an in-memory, thread-safe index (RLock) with JSON / JSONL
-  export/import — the same posture as :class:`ExperienceCollector`. Durable
-  history belongs to ``src.memory``;
+  export/import — the same posture as :class:`ExperienceCollector`;
+* persistence is plain SQLite (via :func:`src.memory.base.connect`) so the whole
+  subsystem still works on a phone with no extra dependencies;
 * relevance is deterministic: token overlap with the query, plus small bonuses
   for a matching agent role, matching tags, and the lesson's own confidence;
 * injection is **opt-in** and backward-compatible — an agent told nothing about
@@ -23,6 +30,8 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import sqlite3
 from collections import Counter
 from collections.abc import Callable, Iterable
 from pathlib import Path
@@ -32,10 +41,21 @@ from typing import Any, Protocol
 from src.core.types import AgentResult
 from src.learning.experience_collector import Outcome
 from src.learning.lesson import Lesson, _tokenize
+from src.memory.base import connect
 
-__all__ = ["LessonStore", "LessonInjector", "render_lessons"]
+__all__ = [
+    "LessonDatabase",
+    "LessonInjector",
+    "LessonStore",
+    "default_lesson_db_path",
+    "render_lessons",
+]
 
 logger = logging.getLogger(__name__)
+
+#: Schema version written to ``PRAGMA user_version`` of the lessons database.
+_SCHEMA_VERSION = 1
+
 
 #: Relevance-weighting knobs (deterministic; tune in one place).
 _LEXICAL_WEIGHT = 1.0
@@ -77,13 +97,154 @@ def render_lessons(lessons: Iterable[Lesson]) -> str:
     return "\n".join(lines)
 
 
+def default_lesson_db_path() -> Path:
+    """Where the lessons database lives when the caller gives no path.
+
+    ``$ZYVO_LESSON_DB`` wins (handy in tests/containers); otherwise
+    ``~/.local/share/tyb-zyv-ai/lessons.db``.
+    """
+    override = os.environ.get("ZYVO_LESSON_DB")
+    if override:
+        return Path(override)
+    return Path.home() / ".local" / "share" / "tyb-zyv-ai" / "lessons.db"
+
+
+class LessonDatabase:
+    """SQLite persistence for :class:`Lesson` records (one ``lessons`` table).
+
+    The schema is versioned through ``PRAGMA user_version``;
+    :meth:`migrate_schema` is idempotent and safe to call on every open. Rows are
+    keyed by lesson id, so :meth:`save` upserts and re-saving an updated lesson
+    overwrites the old row.
+    """
+
+    def __init__(self, path: str | os.PathLike[str] = ":memory:") -> None:
+        self._connection = connect(path)
+        self._lock = RLock()
+        self.migrate_schema()
+
+    # -- schema ------------------------------------------------------------
+    def migrate_schema(self) -> None:
+        """Create or upgrade the ``lessons`` table to the current version."""
+        with self._lock:
+            version = int(self._connection.execute("PRAGMA user_version").fetchone()[0])
+            self._connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS lessons (
+                    id             TEXT PRIMARY KEY,
+                    principle      TEXT NOT NULL,
+                    context        TEXT NOT NULL DEFAULT '',
+                    confidence     REAL NOT NULL DEFAULT 0.0,
+                    evidence       TEXT NOT NULL DEFAULT '[]',
+                    source_outcome TEXT NOT NULL,
+                    created_at     REAL NOT NULL DEFAULT 0.0,
+                    agent_role     TEXT NOT NULL DEFAULT '',
+                    tags           TEXT NOT NULL DEFAULT '[]'
+                )
+                """
+            )
+            if version < _SCHEMA_VERSION:
+                # v0 -> v1: the table itself is the migration (created above).
+                self._connection.execute(f"PRAGMA user_version={_SCHEMA_VERSION}")
+            self._connection.commit()
+
+    @property
+    def connection(self) -> sqlite3.Connection:
+        """The underlying SQLite connection."""
+        return self._connection
+
+    # -- write / read ------------------------------------------------------
+    def save(self, lessons: Iterable[Lesson]) -> int:
+        """Upsert every lesson; returns how many were written."""
+        rows = [
+            (
+                lesson.id,
+                lesson.principle,
+                lesson.context,
+                lesson.confidence,
+                json.dumps(list(lesson.evidence), ensure_ascii=False),
+                lesson.source_outcome.value,
+                lesson.created_at,
+                lesson.agent_role,
+                json.dumps(sorted(lesson.tags), ensure_ascii=False),
+            )
+            for lesson in lessons
+        ]
+        with self._lock:
+            self._connection.executemany(
+                """
+                INSERT INTO lessons (
+                    id, principle, context, confidence,
+                    evidence, source_outcome, created_at, agent_role, tags
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    principle=excluded.principle,
+                    context=excluded.context,
+                    confidence=excluded.confidence,
+                    evidence=excluded.evidence,
+                    source_outcome=excluded.source_outcome,
+                    created_at=excluded.created_at,
+                    agent_role=excluded.agent_role,
+                    tags=excluded.tags
+                """,
+                rows,
+            )
+            self._connection.commit()
+        return len(rows)
+
+    def load(self) -> list[Lesson]:
+        """Read every lesson, newest first; malformed rows are skipped."""
+        with self._lock:
+            rows = list(self._connection.execute("SELECT * FROM lessons").fetchall())
+        lessons: list[Lesson] = []
+        for row in rows:
+            try:
+                lessons.append(self._row_to_lesson(row))
+            except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+                logger.warning("lesson database: skipping row %r: %s", row["id"], exc)
+        lessons.sort(key=lambda lesson: lesson.created_at, reverse=True)
+        return lessons
+
+    def count(self) -> int:
+        """How many lessons the table holds."""
+        with self._lock:
+            row = self._connection.execute("SELECT COUNT(*) FROM lessons").fetchone()
+        return int(row[0]) if row is not None else 0
+
+    def clear(self) -> None:
+        """Delete every stored lesson."""
+        with self._lock:
+            self._connection.execute("DELETE FROM lessons")
+            self._connection.commit()
+
+    def close(self) -> None:
+        """Close the underlying connection."""
+        with self._lock:
+            self._connection.close()
+
+    @staticmethod
+    def _row_to_lesson(row: sqlite3.Row) -> Lesson:
+        return Lesson(
+            id=str(row["id"]),
+            principle=str(row["principle"]),
+            context=str(row["context"]),
+            confidence=float(row["confidence"]),
+            evidence=tuple(str(item) for item in json.loads(row["evidence"])),
+            source_outcome=Outcome(str(row["source_outcome"])),
+            created_at=float(row["created_at"]),
+            agent_role=str(row["agent_role"]),
+            tags=frozenset(str(item) for item in json.loads(row["tags"])),
+        )
+
+
 class LessonStore:
     """Thread-safe, in-memory index of :class:`Lesson` principles."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, database: LessonDatabase | None = None) -> None:
         self._lessons: list[Lesson] = []
         self._by_id: dict[str, Lesson] = {}
         self._lock = RLock()
+        self._database = database
 
     # -- mutation -----------------------------------------------------------
     def add(self, lesson: Lesson) -> Lesson:
@@ -314,6 +475,33 @@ class LessonStore:
                 continue
             added += 1
         return added
+
+    # -- SQLite persistence (Phase 4) --------------------------------------
+    @property
+    def database(self) -> LessonDatabase | None:
+        """The configured :class:`LessonDatabase` (``None`` when unset)."""
+        return self._database
+
+    def _resolve_database(self, database: LessonDatabase | None) -> LessonDatabase:
+        resolved = database if database is not None else self._database
+        if resolved is None:
+            raise ValueError(
+                "no lesson database configured; pass one or construct the store "
+                "with LessonStore(database=...)"
+            )
+        return resolved
+
+    def save_to_db(self, database: LessonDatabase | None = None) -> int:
+        """Persist every in-memory lesson to the database; returns how many."""
+        return self._resolve_database(database).save(self.all())
+
+    def load_from_db(self, database: LessonDatabase | None = None) -> int:
+        """Load lessons from the database into memory; returns how many were added."""
+        return self.add_many(self._resolve_database(database).load())
+
+    def migrate_schema(self, database: LessonDatabase | None = None) -> None:
+        """Ensure the database schema is current (safe to call repeatedly)."""
+        self._resolve_database(database).migrate_schema()
 
 
 class LessonInjector:

@@ -6,10 +6,11 @@ data layer; later phases add the learning itself.
 
 ```
 src/learning/
-├── __init__.py             # Experience, Outcome, ExperienceCollector, Lesson, LessonExtractor, LessonStore, LessonInjector, KNOWN_*
+├── __init__.py             # Experience, Outcome, ExperienceCollector, Lesson, LessonExtractor, LessonStore, LessonInjector, LessonDatabase, LearningOrchestrator, KNOWN_*
 ├── experience_collector.py # the in-memory buffer, queries, stats, IO, pruning
 ├── lesson.py               # Lesson + LessonExtractor (Phase 2)
-└── lesson_store.py         # LessonStore + LessonInjector + render_lessons (Phase 3)
+├── lesson_store.py         # LessonStore + LessonInjector + render_lessons + LessonDatabase (Phase 3/4)
+└── orchestrator.py         # LearningOrchestrator + ExtractionReport (Phase 4)
 ```
 
 ## Experience — one recorded action
@@ -181,6 +182,9 @@ union of evidence and tags, the most common agent/outcome, the latest
 - **Phase 3 (done)** — `LessonStore` + `LessonInjector`: rank the stored lessons
   against a task and fold the relevant ones into an agent's prompt, closing the
   learn → apply loop (see below).
+- **Phase 4 (done)** — `LearningOrchestrator` runs the whole pipeline in one
+  call and drops weak lessons; `LessonDatabase` persists lessons to SQLite; the
+  TUI gains a **Lessons** view.
 
 ## Using lessons (Phase 3) — closing the loop
 
@@ -245,3 +249,63 @@ store.export(path) / import_from(path)       # JSON   (+ jsonl variants)
 (`- (confidence) principle — context`), usable on its own. The store is
 thread-safe (RLock) and, like the collector, deliberately in-memory — durable
 history stays in `src.memory`.
+
+## Auto-extraction (Phase 4) — the pipeline in one call
+
+`LearningOrchestrator` wires the three pieces together
+(`collector → extractor → store`) and runs them with one method. Weak lessons
+(**`confidence < 0.5`** by default) are dropped before storing:
+
+```python
+from src.learning import LearningOrchestrator
+
+orchestrator = LearningOrchestrator(collector, extractor, store)   # min_confidence=0.5
+
+report = orchestrator.auto_extract(task_id="task-42")   # or experiences=[...], or nothing
+# ExtractionReport(extracted=3, kept=2, dropped=1, lessons=(...))
+```
+
+`auto_extract` resolves its source in this priority: explicit `experiences`,
+else `task_id`'s collected experiences (oldest first), else **every** collected
+experience. Pass `min_confidence=` to override the floor for one run.
+`ExtractionReport.to_dict()` gives a JSON view (`extracted` / `kept` / `dropped` /
+`lessons`).
+
+## Persistence (Phase 4) — lessons in SQLite
+
+The in-memory store stays the fast working copy; `LessonDatabase` is the durable
+record — one `lessons` table, versioned through `PRAGMA user_version`, opened
+with the same WAL connection helper as `src.memory`.
+
+```python
+from src.learning import LessonDatabase, LessonStore, default_lesson_db_path
+
+db = LessonDatabase(default_lesson_db_path())   # or ":memory:" / any path
+store = LessonStore(database=db)                # wire the store to the db
+
+store.save_to_db()        # upsert every in-memory lesson   -> int
+store.load_from_db()      # load lessons into memory         -> int
+store.migrate_schema()    # ensure the schema is current (idempotent)
+
+db.count() / db.load() / db.clear() / db.close()
+```
+
+Rows are keyed by lesson id, so `save` is an upsert (re-saving an updated lesson
+overwrites the old row). `load()` returns newest-first and **skips malformed
+rows** with a warning. `save_to_db` / `load_from_db` / `migrate_schema` accept an
+explicit `database=` argument, so a store built without one can still be
+persisted. Path override: `$ZYVO_LESSON_DB` (else
+`~/.local/share/tyb-zyv-ai/lessons.db`, same dir as the memory DB).
+
+## The Lessons view (Phase 4) — see what was learned
+
+The TUI has a **Lessons** modal showing every lesson in the app's store:
+
+* press **`ctrl+l`** (or type **`:lessons`**) to open it;
+* columns: confidence, principle, agent, evidence count, tags;
+* confidence colour: green ≥ 0.7, yellow ≥ 0.5, red below;
+* filter by text (matches principle / context / tags) in the input box, and by
+  confidence with keys **`1`** (all) **`2`** (≥0.3) **`3`** (≥0.6) **`4`** (≥0.8).
+
+`TuiState` owns the store (`state.lesson_store`) and accepts a pre-populated one
+via `TuiState(..., lesson_store=store)` — e.g. one loaded from SQLite at startup.

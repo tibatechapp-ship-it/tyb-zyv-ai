@@ -9,11 +9,13 @@ from textual.widgets import Input
 from src.agents.base import BaseAgent
 from src.agents.registry import AgentRegistry
 from src.core.backend import EchoBackend
+from src.learning import Lesson, Outcome
 from src.tui.app import ZyvoTUI, run_app
 from src.tui.commands import KNOWN_COMMANDS, parse_command
 from src.tui.screens.agents import AgentsScreen
 from src.tui.screens.dashboard import DashboardScreen
 from src.tui.screens.help import HelpScreen
+from src.tui.screens.lessons import LessonsScreen
 from src.tui.screens.logs import LogsScreen
 from src.tui.screens.monitor import MonitorScreen
 from src.tui.screens.tasks import TasksScreen
@@ -35,6 +37,20 @@ class _Bad(BaseAgent):
         raise RuntimeError("nope")
 
 
+def _make_lesson(lid: str = "l1", *, principle: str = "always run the tests", confidence: float = 0.8, tags: tuple[str, ...] = ("deploy",)) -> Lesson:
+    return Lesson(
+        id=lid,
+        principle=principle,
+        context="deploy",
+        confidence=confidence,
+        evidence=("t1:s1",),
+        source_outcome=Outcome.FAILURE,
+        created_at=1.0,
+        agent_role="coder",
+        tags=frozenset(tags),
+    )
+
+
 def _registry() -> AgentRegistry:
     return AgentRegistry([_Echo(EchoBackend()), _Bad(EchoBackend())])
 
@@ -49,6 +65,7 @@ def test_parse_command() -> None:
     parsed = parse_command(":agents")
     assert parsed.kind == "command" and parsed.name == "agents" and parsed.text == ""
     assert "agents" in KNOWN_COMMANDS
+    assert "lessons" in KNOWN_COMMANDS
 
 
 def test_parse_command_with_args() -> None:
@@ -110,6 +127,19 @@ def test_state_filtered_logs() -> None:
     assert [r["level"] for r in state.filtered_logs(level="ERROR")] == ["ERROR"]
     assert len(state.filtered_logs(query="world")) == 1
     assert len(state.filtered_logs(level="error", query="world")) == 0
+
+
+def test_state_lesson_store_default_and_injected() -> None:
+    from src.learning import LessonStore
+
+    state = TuiState(_registry(), EchoBackend())
+    assert isinstance(state.lesson_store, LessonStore)
+    assert len(state.lesson_store) == 0
+
+    store = LessonStore()
+    store.add(_make_lesson("x"))
+    injected = TuiState(_registry(), EchoBackend(), lesson_store=store)
+    assert injected.lesson_store is store
 
 
 # ── widgets ──────────────────────────────────────────────────────────────
@@ -197,6 +227,14 @@ def test_app_modal_views_open_and_close() -> None:
             await pilot.press("escape")
             await pilot.pause()
 
+            app.action_show_lessons()
+            await pilot.pause()
+            assert isinstance(app.screen, LessonsScreen)
+            app.screen.build_table()
+            app.screen.action_set_confidence(0.0)
+            await pilot.press("escape")
+            await pilot.pause()
+
             app.action_show_help()
             await pilot.pause()
             assert isinstance(app.screen, HelpScreen)
@@ -204,6 +242,92 @@ def test_app_modal_views_open_and_close() -> None:
             await pilot.pause()
 
             assert isinstance(app.screen, DashboardScreen)
+
+    asyncio.run(scenario())
+
+
+def test_lessons_screen_renders_and_filters() -> None:
+    app = ZyvoTUI(registry=_registry(), backend=EchoBackend())
+    app.state.lesson_store.add(
+        _make_lesson("a", principle="always run the tests before deploy", confidence=0.9, tags=("deploy",))
+    )
+    app.state.lesson_store.add(
+        _make_lesson("b", principle="never force push to main", confidence=0.4, tags=("git",))
+    )
+
+    async def scenario() -> None:
+        async with app.run_test() as pilot:
+            app.action_show_lessons()
+            await pilot.pause()
+            assert isinstance(app.screen, LessonsScreen)
+
+            # Both lessons show with the default (all) filter.
+            assert app.screen.build_table().row_count == 2
+
+            # Confidence filter hides the weak lesson.
+            app.screen.action_set_confidence(0.6)
+            assert app.screen.build_table().row_count == 1
+            app.screen.action_set_confidence(0.0)
+
+            # Text filter matches principle / tag.
+            box = app.screen.query_one("#lesson-filter", Input)
+            box.value = "force push"
+            await pilot.pause()
+            assert [lesson.id for lesson in app.screen.visible_lessons()] == ["b"]
+            box.value = "tests"
+            await pilot.pause()
+            assert [lesson.id for lesson in app.screen.visible_lessons()] == ["a"]
+            box.value = "nothing-matches"
+            await pilot.pause()
+            assert app.screen.build_table().row_count == 1  # "(no lessons yet)" row
+            box.value = ""
+
+            await pilot.press("escape")
+            await pilot.pause()
+
+    asyncio.run(scenario())
+
+
+def test_lessons_screen_confidence_colour_bands() -> None:
+    app = ZyvoTUI(registry=_registry(), backend=EchoBackend())
+    app.state.lesson_store.add(_make_lesson("hi", confidence=0.9))
+    app.state.lesson_store.add(_make_lesson("mid", confidence=0.6))
+    app.state.lesson_store.add(_make_lesson("lo", confidence=0.3))
+
+    async def scenario() -> None:
+        async with app.run_test() as pilot:
+            app.action_show_lessons()
+            await pilot.pause()
+            # green / yellow / red bands all render.
+            assert app.screen.build_table().row_count == 3
+            await pilot.press("escape")
+
+    asyncio.run(scenario())
+
+
+def test_lessons_screen_empty_store() -> None:
+    app = ZyvoTUI(registry=_registry(), backend=EchoBackend())
+
+    async def scenario() -> None:
+        async with app.run_test() as pilot:
+            app.action_show_lessons()
+            await pilot.pause()
+            assert isinstance(app.screen, LessonsScreen)
+            assert app.screen.build_table().row_count == 1  # the "(no lessons yet)" row
+            await pilot.press("escape")
+
+    asyncio.run(scenario())
+
+
+def test_ctrl_l_opens_lessons() -> None:
+    app = ZyvoTUI(registry=_registry(), backend=EchoBackend())
+
+    async def scenario() -> None:
+        async with app.run_test() as pilot:
+            await pilot.press("ctrl+l")
+            await pilot.pause()
+            assert isinstance(app.screen, LessonsScreen)
+            await pilot.press("escape")
 
     asyncio.run(scenario())
 
@@ -217,6 +341,11 @@ def test_app_column_commands() -> None:
             box.value = ":agents"
             await pilot.press("enter")
             assert isinstance(app.screen, AgentsScreen)
+            await pilot.press("escape")
+            box.value = ":lessons"
+            await pilot.press("enter")
+            await pilot.pause()
+            assert isinstance(app.screen, LessonsScreen)
             await pilot.press("escape")
             box.value = ":quit"
             await pilot.press("enter")

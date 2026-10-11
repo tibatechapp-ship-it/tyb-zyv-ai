@@ -13,6 +13,10 @@ merging similar ones and scoring confidence.
 Phase 3 — :class:`LessonStore` + :class:`LessonInjector`: rank the stored
 lessons against a task and fold the relevant ones into an agent's prompt
 (:func:`render_lessons`), closing the learn → apply loop.
+
+Phase 4 — :class:`LearningOrchestrator` runs the whole pipeline
+(collector → extractor → store) in one call and drops weak lessons, while
+:class:`LessonDatabase` persists lessons to SQLite.
 """
 
 from __future__ import annotations
@@ -26,18 +30,34 @@ from src.learning.experience_collector import (
     Outcome,
 )
 from src.learning.lesson import Lesson, LessonExtractor
-from src.learning.lesson_store import LessonInjector, LessonStore, render_lessons
+from src.learning.lesson_store import (
+    LessonDatabase,
+    LessonInjector,
+    LessonStore,
+    default_lesson_db_path,
+    render_lessons,
+)
+from src.learning.orchestrator import (
+    DEFAULT_MIN_CONFIDENCE,
+    ExtractionReport,
+    LearningOrchestrator,
+)
 
 __all__ = [
     "DAY",
+    "DEFAULT_MIN_CONFIDENCE",
     "KNOWN_ACTION_TYPES",
     "KNOWN_AGENT_ROLES",
     "Experience",
     "ExperienceCollector",
+    "ExtractionReport",
     "Lesson",
+    "LessonDatabase",
     "LessonExtractor",
     "LessonInjector",
     "LessonStore",
+    "LearningOrchestrator",
     "Outcome",
+    "default_lesson_db_path",
     "render_lessons",
 ]

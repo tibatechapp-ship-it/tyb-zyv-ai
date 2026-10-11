@@ -85,6 +85,23 @@ bonus fuzz, chaos. Run: `python -m pytest tests/adversarial/ -v`.
   calls build_messages WITHOUT lessons then layers them on, so subclasses that
   override build_messages with the old (task, context) signature keep working.
   Tests: `tests/test_learning_lesson_store.py`.
+  Phase 4 adds `LessonDatabase` (SQLite `lessons` table, PRAGMA user_version,
+  upsert keyed by id, load skips malformed rows) + `default_lesson_db_path()`
+  ($ZYVO_LESSON_DB else ~/.local/share/tyb-zyv-ai/lessons.db) and store methods
+  `save_to_db`/`load_from_db`/`migrate_schema` (accept an explicit `database=`).
+  Uses `src.memory.base.connect`. Tests: `tests/test_learning_persistence.py`.
+- `src/learning/orchestrator.py` — Phase 4 `LearningOrchestrator(collector,
+  extractor, store, *, min_confidence=0.5)`: `auto_extract(task_id=None,
+  experiences=None, min_confidence=None)` runs collector→extractor→store in one
+  call, drops lessons with confidence < floor, returns `ExtractionReport`
+  (extracted/kept/dropped/lessons + to_dict). Source priority: explicit
+  experiences > task's experiences (oldest-first) > all. Tests:
+  `tests/test_learning_orchestrator.py`.
+- `src/tui/screens/lessons.py` — Phase 4 `LessonsScreen` (ModalBase): table of
+  confidence/principle/agent/evidence/tags, text filter input, confidence
+  keys 1–4. Opened by `ZyvoTUI.action_show_lessons` (ctrl+l app binding,
+  `:lessons` command). `TuiState.lesson_store` (defaults to a fresh LessonStore;
+  injectable via `TuiState(..., lesson_store=)`).
 - `src/memory/` — persistent memory, plain SQLite, no deps (6 phases done):
   base.py (connect/MemoryRecord/MemoryStore+RLock/Clock), embeddings.py
   (HashingEmbedder/cosine), episodic.py, semantic.py (optional injectable
@@ -152,6 +169,11 @@ bonus fuzz, chaos. Run: `python -m pytest tests/adversarial/ -v`.
   lessons and layer the block on afterwards — passing `lessons=` broke a
   subclass that overrides build_messages with the old signature. 899 tests,
   98.88% cov.
+- 2026-10-11: released **v2.5.0** (memory Phases 1-6 + learning Phases 1-3).
+- 2026-10-11: learning Phase 4 — `LearningOrchestrator` (collector→extractor→
+  store in one call; drops lessons with confidence < 0.5) + `LessonDatabase`
+  (SQLite persistence, PRAGMA user_version, upsert by id) + TUI `LessonsScreen`
+  (ctrl+l / :lessons; text + confidence filters). `TuiState.lesson_store`.
 - Lesson: pytest `python_classes=Test*` collects agent class `TesterAgent`/alias
   `Tester` → PytestCollectionWarning. Never import `TesterAgent` under a
   Test-prefixed name in tests; use `AGENT_CLASSES` or alias it (e.g. `as QA`).

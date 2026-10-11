@@ -12,6 +12,7 @@ from src.core.backend import LLMBackend
 from src.tui.screens.agents import AgentsScreen
 from src.tui.screens.dashboard import DashboardScreen
 from src.tui.screens.help import HelpScreen
+from src.tui.screens.lessons import LessonsScreen
 from src.tui.screens.logs import LogsScreen
 from src.tui.screens.monitor import MonitorScreen
 from src.tui.screens.tasks import TasksScreen
@@ -26,7 +27,10 @@ class ZyvoTUI(App[None]):
     CSS_PATH = "app.tcss"
     TITLE = "tyb-zyv-ai"
     SUB_TITLE = "20-agent console"
-    BINDINGS = [("ctrl+c", "quit", "Quit")]
+    BINDINGS = [
+        ("ctrl+c", "quit", "Quit"),
+        ("ctrl+l", "show_lessons", "Lessons"),
+    ]
 
     def __init__(
         self,
@@ -53,6 +57,9 @@ class ZyvoTUI(App[None]):
 
     def action_show_logs(self) -> None:
         self.push_screen(LogsScreen())
+
+    def action_show_lessons(self) -> None:
+        self.push_screen(LessonsScreen())
 
     def action_show_help(self) -> None:
         self.push_screen(HelpScreen())
