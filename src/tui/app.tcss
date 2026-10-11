@@ -1,0 +1,60 @@
+/* tyb-zyv-ai TUI */
+
+Screen {
+    background: $surface;
+}
+
+#body {
+    height: 1fr;
+}
+
+#sidebar {
+    width: 34;
+    border: round $primary;
+    padding: 0 1;
+}
+
+#conversation {
+    width: 1fr;
+}
+
+#log {
+    height: 1fr;
+    border: round $accent;
+    padding: 0 1;
+}
+
+#command {
+    dock: bottom;
+    margin-top: 1;
+}
+
+.section-title {
+    text-style: bold;
+    color: $accent;
+    padding: 0 1;
+}
+
+.modal-title {
+    text-style: bold;
+    color: $accent;
+    padding-bottom: 1;
+}
+
+.modal-hint {
+    color: $text-muted;
+    padding-top: 1;
+}
+
+#agents-modal,
+#tasks-modal,
+#monitor-modal,
+#logs-modal,
+#help-modal {
+    width: 80%;
+    height: auto;
+    max-height: 80%;
+    border: thick $primary;
+    background: $surface;
+    padding: 1 2;
+}

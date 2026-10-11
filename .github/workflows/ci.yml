@@ -30,16 +30,18 @@ jobs:
       - name: Install tooling
         run: |
           python -m pip install --upgrade pip
-          python -m pip install ruff mypy
+          python -m pip install ruff mypy textual
 
       - name: Byte-compile (syntax check)
-        run: python -m py_compile zyvo-telegram.py zyvo-voice.py
+        run: |
+          python -m py_compile zyvo-telegram.py zyvo-voice.py
+          python -m compileall -q src
 
       - name: Ruff lint
         run: ruff check --output-format=github .
 
       - name: Mypy type-check
-        run: mypy zyvo-telegram.py zyvo-voice.py
+        run: mypy zyvo-telegram.py zyvo-voice.py src
 
       - name: Type-hint coverage (every function annotated)
         run: python scripts/check_annotations.py

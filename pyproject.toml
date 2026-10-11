@@ -1,6 +1,6 @@
 [project]
 name = "tyb-zyv-ai"
-version = "1.0.0"
+version = "1.1.0"
 description = "AI-powered assistants for Termux"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -26,6 +26,9 @@ classifiers = [
 # best voice experience (see requirements.txt).
 [project.optional-dependencies]
 voice = ["gTTS>=2.5.0", "SpeechRecognition>=3.10.0"]
+# The 20-agent framework + interactive TUI (src/).
+tui = ["textual>=0.80"]
+dev = ["pytest>=7", "pytest-cov", "pytest-textual-snapshot", "textual>=0.80"]
 
 # ─── Linting (ruff) ─────────────────────────────────────────────────────────
 [tool.ruff]
@@ -55,6 +58,8 @@ pretty = false
 [tool.pytest.ini_options]
 minversion = "7.0"
 testpaths = ["tests"]
+# The src/ package is imported as `src.*` from the repository root.
+pythonpath = ["."]
 addopts = "-ra --strict-markers --strict-config"
 
 # --------------------------------------------------------------------------- #
