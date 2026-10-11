@@ -14,11 +14,26 @@ from __future__ import annotations
 import importlib.util
 import sys
 import types
+from collections.abc import Generator
 from pathlib import Path
 
 import pytest
 
 ROOT: Path = Path(__file__).resolve().parent.parent
+_TESTS_DIR: Path = Path(__file__).resolve().parent
+_ADVERSARIAL_DIR: Path = _TESTS_DIR / "adversarial"
+
+# The adversarial suite lives in its own sub-directory and imports `report` and
+# `attacks` from there, plus the shared `deep_helpers` from tests/. Put both dirs
+# on sys.path up-front so those imports resolve regardless of collection order.
+for _entry in (str(_ADVERSARIAL_DIR), str(_TESTS_DIR)):
+    if _entry not in sys.path:
+        sys.path.insert(0, _entry)
+
+from report import AdversarialReport  # noqa: E402  (after sys.path is set)
+
+#: The one adversarial verdict ledger, shared for the whole session.
+REPORT = AdversarialReport()
 
 
 def _load(name: str, filename: str) -> types.ModuleType:
@@ -105,3 +120,47 @@ class FakeResponse:
     def __iter__(self) -> object:
         # urlopen() on the SSE stream returns an iterable of lines.
         return iter(self._body.splitlines(keepends=True))
+
+
+# ── adversarial suite: verdict ledger + report hooks ────────────────────
+# Every test in a module that sets ``CATEGORY`` becomes a verdict for the
+# session report: PASS → HELD, FAIL → BROKEN. The table prints at the end.
+# (Markers ``adversarial``/``slow`` are registered in pyproject.toml.)
+
+
+@pytest.fixture(scope="session")
+def adversarial_report() -> AdversarialReport:
+    """The session-wide adversarial report ledger."""
+    return REPORT
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(
+    item: pytest.Item, call: pytest.CallInfo
+) -> Generator[None, object, None]:
+    """Record one held/broken verdict for every adversarial test that runs."""
+    outcome: object = yield
+    report = getattr(outcome, "get_result")()
+    if getattr(report, "when", None) != "call":
+        return
+    module = getattr(item, "module", None)
+    category = getattr(module, "CATEGORY", None) if module is not None else None
+    if category is None or getattr(report, "skipped", False):
+        return
+    passed = bool(getattr(report, "passed", False))
+    detail = "" if passed else str(getattr(report, "longreprtext", ""))[:300]
+    REPORT.record(str(category), item.name, held=passed, detail=detail)
+
+
+def pytest_terminal_summary(
+    terminalreporter: object, exitstatus: int, config: pytest.Config
+) -> None:
+    """Print the adversarial report table (only when vectors actually ran)."""
+    write_line = getattr(terminalreporter, "write_line", None)
+    if write_line is None or REPORT.total == 0:
+        return
+    write_line("")
+    for line in REPORT.summary().splitlines():
+        write_line(line)
+    if REPORT.broken_count:
+        write_line(f"  {REPORT.broken_count} vector(s) BROKEN — see ADVERSARIAL.md")

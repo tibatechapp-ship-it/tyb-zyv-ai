@@ -130,6 +130,38 @@ change shows up as a reviewable diff.
 
 ---
 
+## Adversarial suite (`tests/adversarial/`)
+
+The red-team layer. It **inverts the verdict**: a test PASSES when the attack is
+repelled (**HELD**) and FAILS when it breaks through (**BROKEN**) — a BROKEN
+vector is a discovered weakness to fix, not a test bug. Mock backends only; no
+server, network or real LLM. A verdict table prints at the end of the run and the
+findings are written up in [`ADVERSARIAL.md`](../ADVERSARIAL.md).
+
+```bash
+python -m pytest tests/adversarial/ -v              # 92 vectors + verdict table
+python -m pytest tests/adversarial/ -m "not slow"   # skip heavy vectors
+```
+
+| Category | File | What it attacks |
+|----------|------|-----------------|
+| 1 — Injection | `test_injection.py` | prompt/command/SQL/path/template/header injection, unicode — all delivered as **inert text** |
+| 2 — DoS | `test_dos.py` | endless loops, recursion, huge & bomb payloads, request floods, ReDoS (all **bounded**) |
+| 3 — Manipulation | `test_manipulation.py` | role confusion, context flip, nested orders, authority, salami, gaslighting — authority is a **code fact** |
+| 4 — Security | `test_security.py` | secret leak, permission drift, sandbox escape, concurrency, SSRF, supply chain |
+| 5 — Integration | `test_integration.py` | cascade, deadlock, livelock, Byzantine, partition, clock skew, split brain, herd |
+| 6 — Comprehension | `test_comprehension.py` | ambiguity, contradiction, paradox, sarcasm, code-switch (Arabic), typos — delivered **verbatim** |
+| 7 — Fuzzing (bonus) | `test_fuzz.py` | ~1,000 seeded hostile strings through agent/message/queue/cache |
+| 8 — Chaos (bonus) | `test_chaos.py` | random backend faults under fan-out/pipeline/retry |
+
+`test_report_contract.py` guards the suite's shape (all categories present, each
+≥ 8 vectors, ≥ 48 total) and pins a golden snapshot of the report JSON. Vectors
+7–8 are the commissioned *bonus* work; category 5 exposed and fixed a Byzantine-
+backend type leak, and category 2 exposed and fixed a nested-JSON stack
+exhaustion in the persistent queue (both documented in `ADVERSARIAL.md`).
+
+---
+
 ## CI
 
 | Workflow | What it does |

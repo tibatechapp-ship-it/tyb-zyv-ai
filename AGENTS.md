@@ -30,6 +30,19 @@ BlockingBackend) — no server/network/real LLM:
 - `test_snapshot_contract.py` + `tests/__snapshots__/` — syrupy golden catalog of
   the 20-agent contract (tools/permissions/persona).
 
+## Adversarial suite (v2.3.0)
+`tests/adversarial/` — red-team layer over the real 20 agents (mock backends only).
+**Inverted verdict**: PASS = attacked repelled (HELD), FAIL = weakness (BROKEN).
+Session table auto-printed; findings written in `ADVERSARIAL.md`. 92 vectors, 8
+categories: injection, dos, manipulation, security, integration, comprehension +
+bonus fuzz, chaos. Run: `python -m pytest tests/adversarial/ -v`.
+- `report.py` (AdversarialReport HELD/BROKEN ledger), `attacks.py` (payload corpus
+  + `tree_snapshot`/`imported_modules` helpers).
+- `test_report_contract.py` (meta) guards shape: all categories present, ≥8 each,
+  ≥48 total, golden snapshot of the report JSON.
+- Hook/fixture (`REPORT`, `pytest_runtest_makereport`, `pytest_terminal_summary`,
+  `adversarial_report`) live in the ONE root `tests/conftest.py` — see lesson.
+
 ## Architecture (key files)
 - `src/core/` — types.py (Message/AgentResult), backend.py (LLMBackend
   protocol + EchoBackend for offline tests), resilience.py, watchdog.py,
@@ -52,13 +65,21 @@ BlockingBackend) — no server/network/real LLM:
   `TuiState(registry=None, backend=X)` auto-builds the 20-agent registry.
 - 2026-10-11: v2.2.0 — deep 5-phase test suite added (506 tests, 98.5% cov);
   coverage floor raised to 95%; every agent permission now backed by a tool.
-- 2026-10-11: version lives in pyproject.toml AND src/__init__.py (both 2.2.0).
+- 2026-10-11: v2.3.0 — adversarial suite added (92 vectors, 8 categories; 604
+  tests total, 98.5% cov). Fixed 2 real weaknesses it found: `BaseAgent.run` now
+  rejects a non-`str` backend return (Byzantine); `CommandQueue._load` catches
+  `RecursionError` from a nested-JSON bomb (was a startup crash).
+- 2026-10-11: version lives in pyproject.toml AND src/__init__.py (both 2.3.0).
 - 2026-10-11: git push via `gh` credential helper; releases via `gh release create`.
 - Lesson: pytest `python_classes=Test*` collects agent class `TesterAgent`/alias
   `Tester` → PytestCollectionWarning. Never import `TesterAgent` under a
   Test-prefixed name in tests; use `AGENT_CLASSES` or alias it (e.g. `as QA`).
 - Lesson: mutmut/hypothesis pip installs hang on Termux (libcst sdist build);
   use `syrupy` snapshots for the offline golden tests instead.
+- Lesson: NEVER add a second `conftest.py` in a tests sub-dir without `__init__.py`
+  — both import as top-level module `conftest` and shadow each other (broke
+  `from conftest import FakePopen` in test_zyvo_telegram/voice). Keep ONE conftest
+  (root) and register its markers in pyproject `[tool.pytest.ini_options] markers`.
 
 ## Release flow
 1. commit + push main

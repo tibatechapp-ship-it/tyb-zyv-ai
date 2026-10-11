@@ -1,0 +1,43 @@
+# serializer version: 1
+# name: test_report_snapshot_is_stable
+  dict({
+    'broken': 1,
+    'by_category': dict({
+      '1-injection': list([
+        1,
+        0,
+      ]),
+      '2-dos': list([
+        1,
+        0,
+      ]),
+      '4-security': list([
+        0,
+        1,
+      ]),
+    }),
+    'held': 2,
+    'outcomes': list([
+      dict({
+        'category': '1-injection',
+        'detail': '',
+        'vector': 't_sql',
+        'verdict': 'HELD',
+      }),
+      dict({
+        'category': '2-dos',
+        'detail': '',
+        'vector': 't_loop',
+        'verdict': 'HELD',
+      }),
+      dict({
+        'category': '4-security',
+        'detail': 'permission widened',
+        'vector': 't_perms',
+        'verdict': 'BROKEN',
+      }),
+    ]),
+    'resilience': 0.6667,
+    'total': 3,
+  })
+# ---

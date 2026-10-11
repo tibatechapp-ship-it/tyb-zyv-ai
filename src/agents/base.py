@@ -64,6 +64,12 @@ class BaseAgent(ABC):
         try:
             messages = self.build_messages(task, context)
             output = self.backend.generate(messages, model=self.model)
+            # A backend that violates the str contract (Byzantine failure) must
+            # fail loudly here, not smuggle a non-str into AgentResult.output.
+            if not isinstance(output, str):
+                raise TypeError(
+                    f"backend returned {type(output).__name__!r}, expected str"
+                )
         except Exception as exc:  # noqa: BLE001 - agents must never crash callers
             elapsed = time.perf_counter() - started
             self.metrics.record(elapsed, ok=False)

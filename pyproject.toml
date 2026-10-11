@@ -1,6 +1,6 @@
 [project]
 name = "tyb-zyv-ai"
-version = "2.2.0"
+version = "2.3.0"
 description = "AI-powered assistants for Termux"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -70,6 +70,10 @@ testpaths = ["tests"]
 # The src/ package is imported as `src.*` from the repository root.
 pythonpath = ["."]
 addopts = "-ra --strict-markers --strict-config"
+markers = [
+    "adversarial: adversarial attack vector (tests/adversarial)",
+    "slow: resource-heavy vector (large payloads)",
+]
 # The deep test-suite (phases 1–5) mixes sync and async tests.
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"

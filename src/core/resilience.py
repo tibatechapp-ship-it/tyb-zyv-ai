@@ -259,7 +259,10 @@ class CommandQueue:
             return
         try:
             data = json.loads(raw)
-        except json.JSONDecodeError:
+        except (ValueError, RecursionError):
+            # ValueError covers malformed JSON (JSONDecodeError); RecursionError
+            # covers a valid-but-deeply-nested JSON bomb that blows the stack.
+            # Either way the queue is treated as empty, never crashing startup.
             self._items = []
             return
         self._items = [item for item in data if isinstance(item, dict)] if isinstance(data, list) else []
