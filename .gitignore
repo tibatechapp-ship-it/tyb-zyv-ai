@@ -31,6 +31,8 @@ ENV/
 .coverage
 coverage.xml
 coverage.json
+# the published coverage badge is intentionally tracked:
+!.github/badges/coverage.json
 htmlcov/
 .tox/
 
