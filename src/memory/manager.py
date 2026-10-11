@@ -62,7 +62,9 @@ class MemoryManager:
         self._embedder: Embedder | None = make_embedder(embedder)
         self.episodic = EpisodicMemory(self._connection, clock=clock)
         self.semantic = SemanticMemory(self._connection, clock=clock, embedder=self._embedder)
-        self.procedural = ProceduralMemory(self._connection, clock=clock)
+        self.procedural = ProceduralMemory(
+            self._connection, clock=clock, embedder=self._embedder
+        )
         self.emotional = EmotionalMemory(self._connection, clock=clock)
         self._current_session: str | None = None
         with self._lock:
@@ -343,21 +345,30 @@ class MemoryManager:
         )
 
     def _import_skills(self, items: list[dict[str, Any]]) -> int:
+        embedder = self._embedder
+        rows: list[tuple[Any, ...]] = []
+        for item in items:
+            data = item["data"]
+            embedding: str | None = None
+            if embedder is not None:
+                text = f"{data['name']} {data['description']} {' '.join(data['tags'])}"
+                embedding = json.dumps(list(embedder(text)))
+            rows.append(
+                (
+                    item["id"], float(item["ts"]), str(item["iso"]),
+                    data["name"], data["description"], json.dumps(data["steps"]),
+                    json.dumps(data["examples"]), json.dumps(data["tags"]),
+                    int(data.get("uses", 0)), int(data.get("successes", 0)), embedding,
+                )
+            )
         return self._executemany(
             """
             INSERT OR REPLACE INTO skills
-                (id, ts, iso, name, description, steps, examples, tags)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                (id, ts, iso, name, description, steps, examples, tags,
+                 uses, successes, embedding)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            [
-                (
-                    item["id"], float(item["ts"]), str(item["iso"]),
-                    item["data"]["name"], item["data"]["description"],
-                    json.dumps(item["data"]["steps"]), json.dumps(item["data"]["examples"]),
-                    json.dumps(item["data"]["tags"]),
-                )
-                for item in items
-            ],
+            rows,
         )
 
     def _import_preferences(self, items: list[dict[str, Any]]) -> int:

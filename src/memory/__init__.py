@@ -27,7 +27,7 @@ from src.memory.embeddings import Embedder, HashingEmbedder, cosine, make_embedd
 from src.memory.emotional import EmotionalMemory, analyze_tone
 from src.memory.episodic import EpisodicMemory, EventKind
 from src.memory.manager import MemoryManager
-from src.memory.procedural import ProceduralMemory
+from src.memory.procedural import ProceduralMemory, Skill, SkillsRegistry
 from src.memory.semantic import SemanticMemory
 
 __all__ = [
@@ -43,6 +43,8 @@ __all__ = [
     "MemoryStore",
     "ProceduralMemory",
     "SemanticMemory",
+    "Skill",
+    "SkillsRegistry",
     "analyze_tone",
     "connect",
     "cosine",
