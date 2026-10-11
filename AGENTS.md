@@ -54,6 +54,14 @@ bonus fuzz, chaos. Run: `python -m pytest tests/adversarial/ -v`.
 - `src/patterns/` — supervisor, pipeline, fanout, delegation, blackboard.
 - `src/tui/` — app.py (ZyvoTUI, Textual), state.py (TuiState auto-registers
   all 20 when given a backend), screens/ + widgets/.
+- `src/memory/` — Phase 1 persistent memory (plain SQLite, no deps): base.py
+  (connect/MemoryRecord/MemoryStore+RLock/Clock), episodic.py, semantic.py
+  (optional injectable `embedder` for cosine search; lexical default),
+  procedural.py, emotional.py (+ bilingual `analyze_tone`), manager.py
+  (MemoryManager: sessions, context bundle, stats, JSON export/import).
+  Docs: `docs/MEMORY.md`. Tests: `tests/test_memory_stores.py`,
+  `tests/test_memory_manager.py`. DB path: `$ZYVO_MEMORY_DB` else
+  `~/.local/share/tyb-zyv-ai/memory.db`; `":memory:"` for tests.
 
 ## Conventions
 - Every function fully type-annotated (CI enforces via check_annotations.py).
@@ -76,6 +84,10 @@ bonus fuzz, chaos. Run: `python -m pytest tests/adversarial/ -v`.
   races, deadlock, lock-ordering, benchmark). 615 tests, 98.5% cov.
 - 2026-10-11: version lives in pyproject.toml AND src/__init__.py (both 2.4.0).
 - 2026-10-11: git push via `gh` credential helper; releases via `gh release create`.
+- 2026-10-11: memory system Phase 1 shipped (`src/memory/`, v2.5.0 target):
+  four stores over ONE SQLite DB + MemoryManager (sessions, context, export/
+  import). No deps — works on-phone. Semantic search is lexical by default with
+  an injectable `embedder` seam for Phase 2. 695 tests, 98.5% cov.
 - Lesson: pytest `python_classes=Test*` collects agent class `TesterAgent`/alias
   `Tester` → PytestCollectionWarning. Never import `TesterAgent` under a
   Test-prefixed name in tests; use `AGENT_CLASSES` or alias it (e.g. `as QA`).

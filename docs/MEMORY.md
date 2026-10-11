@@ -1,0 +1,190 @@
+# Memory
+
+The agent team has a persistent, four-part memory backed by a single SQLite
+file. It needs **no server, no model and no extra dependencies** — it runs
+offline on a phone exactly as it does on a desktop.
+
+```
+src/memory/
+├── base.py        # connect(), MemoryRecord, MemoryStore (clock + RLock), MemoryKind
+├── episodic.py    # EpisodicMemory   — what happened (timestamped episodes)
+├── semantic.py    # SemanticMemory   — what is true   (durable facts)
+├── procedural.py  # ProceduralMemory — how to do things (named skills)
+├── emotional.py   # EmotionalMemory  — how the user feels (tone/prefs/satisfaction)
+└── manager.py     # MemoryManager    — owns the DB, sessions, context, export/import
+```
+
+## Why four stores
+
+Each store answers a different question, so an agent can pull exactly the slice
+it needs instead of replaying one giant log:
+
+| Store | Question | Backing table(s) | Key fields |
+|-------|----------|------------------|------------|
+| **Episodic** | *What happened?* | `episodes` | ts, iso, session_id, agent, task, result, ok, duration_s |
+| **Semantic** | *What is true?* | `facts` | subject, key, value, source |
+| **Procedural** | *How do we do it?* | `skills` | name, description, steps, examples, tags |
+| **Emotional** | *How does the user feel?* | `preferences`, `signals`, `satisfaction` | key/value/confidence, sentiment/score |
+
+Every row is surfaced as an immutable `MemoryRecord` (`.id`, `.kind`, `.ts`,
+`.iso`, `.data`) with a JSON-friendly `.to_dict()`.
+
+## Quick start
+
+```python
+from src.memory import MemoryManager
+
+with MemoryManager() as mem:                 # default DB:
+    sid = mem.start_session()                #   ~/.local/share/tyb-zyv-ai/memory.db
+
+    mem.remember_task("Planner", "plan the day", "done", duration_s=1.2)
+    mem.semantic.remember("user_name", "tyba", subject="user")
+    mem.procedural.learn("deploy", "ship to GitHub Pages",
+                         steps=["build", "push"], tags=["web"])
+    mem.emotional.set_preference("tone", "arabizi")
+    mem.emotional.observe("shukran, perfect!")          # -> ("positive", 1.0)
+
+    print(mem.context_text("deploy"))        # prompt-ready digest
+    mem.end_session(summary="phase 1 demo")
+```
+
+The database path can be overridden in three ways: pass `path=` to
+`MemoryManager`, set `$ZYVO_MEMORY_DB`, or use the built-in default. `":memory:"`
+gives a throwaway database (great for tests).
+
+## The stores in detail
+
+### Episodic — what happened
+
+```python
+mem.episodic.record("Coder", "write code", "boom", ok=False, duration_s=0.4)
+mem.episodic.recent(10)              # newest first
+mem.episodic.last()                  # the single latest episode, or None
+mem.episodic.between(start, end)     # inclusive time window, oldest first
+mem.episodic.for_agent("Coder")      # one agent's history
+mem.episodic.for_session(sid)        # one session's history
+mem.episodic.search("deploy")        # substring over task + result
+mem.episodic.activity()              # {"2026-10-11": 12, ...} day -> count
+```
+
+### Semantic — what is true
+
+Facts are keyed by `(subject, key)` and upserted, so remembering the same fact
+twice updates it instead of duplicating.
+
+```python
+mem.semantic.remember("user_name", "tyba", subject="user")
+mem.semantic.recall("user_name", subject="user")   # "tyba"
+mem.semantic.forget("user_name", subject="user")
+mem.semantic.search("arabic")                      # relevance-ranked facts
+mem.semantic.all()                                 # everything, sorted
+```
+
+**Relevance ranking (Phase 1)** is dependency-free: a lexical (token-overlap)
+score over subject/key/value. Because it is Unicode-aware, Arabic words match
+too. **Phase 2 upgrade:** pass an `embedder` (`Callable[[str], Sequence[float]]`)
+and `remember` stores a vector while `search` ranks by cosine similarity — the
+call site does not change:
+
+```python
+mem = MemoryManager(embedder=my_embedder)     # any model's embedding function
+```
+
+### Procedural — how to do things
+
+```python
+mem.procedural.learn("deploy", "ship to GitHub Pages",
+                     steps=["build", "push"], examples=["make deploy"],
+                     tags=["web", "github"])
+mem.procedural.get("deploy")
+mem.procedural.find("github deploy")   # best-matching skills
+mem.procedural.all()                   # sorted by name
+mem.procedural.forget("deploy")
+```
+
+### Emotional — how the user feels
+
+```python
+mem.emotional.set_preference("tone", "arabizi", confidence=0.9)
+mem.emotional.preference("tone")                 # "arabizi"
+mem.emotional.observe("this is great, shukran")  # classify + log, -> (label, score)
+mem.emotional.signals(limit=20)                  # recent tone signals
+mem.emotional.record_satisfaction(0.9, note="nice")
+mem.emotional.average_satisfaction()             # mean of all scores, or None
+```
+
+`analyze_tone(text)` is a small bilingual lexicon (English + common Arabic
+cues) returning `("positive" | "negative" | "neutral", score in [-1, 1])`.
+It is the seam a real sentiment model plugs into later without changing callers.
+
+## Sessions
+
+A session groups the episodes of one working stretch.
+
+```python
+sid = mem.start_session()          # or mem.start_session("my-id")
+mem.remember_task("Planner", "plan", "done")   # tagged with the current session
+mem.current_session()              # sid, or None
+mem.end_session(summary="shipped phase 1")
+mem.sessions(limit=20)             # newest first
+mem.session(sid)                   # one session dict, or None
+```
+
+## Context bundle — prime an agent before it runs
+
+`mem.context(query="")` returns a dictionary with recent episodes, the most
+relevant facts and skills, active preferences and the running satisfaction
+average. `mem.context_text(query="")` renders the same thing as a compact
+prompt-friendly block:
+
+```
+session: 2308fd69969b
+- Planner [ok] plan the day
+- Coder [fail] write code
+* user_name: tyba
++ skill deploy
+~ tone = arabizi
+satisfaction: 0.90
+```
+
+## Export / import and stats
+
+```python
+mem.stats()                     # {"sessions": 1, "episodes": 2, ...}
+mem.snapshot()                  # full dict of every table (version 1)
+mem.export_json("dump.json")    # -> bytes written
+mem.import_json("dump.json")    # -> rows restored per table (idempotent)
+```
+
+Import uses `INSERT OR REPLACE` with the original ids, so loading the same
+snapshot twice does not duplicate rows.
+
+## Concurrency
+
+The SQLite connection is opened with `check_same_thread=False` and WAL mode, and
+every store guards execution with an instance `RLock` (mirroring the
+thread-safety work in `src/agents`). `MemoryManager` guards its own session and
+import writes with a lock as well. A 5-thread × 20-write test asserts that all
+100 episodes persist.
+
+## Testing
+
+```bash
+python -m pytest tests/test_memory_stores.py tests/test_memory_manager.py -q
+```
+
+- `tests/test_memory_stores.py` — the four stores + base helpers (injected
+  timestamps, no real clock).
+- `tests/test_memory_manager.py` — sessions, context, export/import round-trip,
+  idempotent import, concurrency.
+
+The memory package sits at **~99 % coverage**; the whole suite stays above the
+95 % floor.
+
+## Roadmap
+
+- **Phase 1 (done)** — persistent SQLite stores, sessions, context, export/import.
+- **Phase 2** — real embeddings + Top-K semantic search (the `embedder` seam).
+- **Phase 3** — richer episodic queries ("what did we do yesterday?") + activity graph.
+- **Phase 4** — procedural skills with context retrieval wiring.
+- **Phase 5** — tone analysis, auto-adjusting replies, satisfaction scoring.

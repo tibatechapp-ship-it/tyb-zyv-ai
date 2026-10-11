@@ -1,0 +1,47 @@
+"""The agent memory system.
+
+Four complementary stores over one SQLite database, fronted by
+:class:`MemoryManager`:
+
+* :class:`EpisodicMemory` — *what happened* (timestamped agent episodes);
+* :class:`SemanticMemory` — *what is true* (durable facts);
+* :class:`ProceduralMemory` — *how to do things* (named skills);
+* :class:`EmotionalMemory` — *how the user feels* (tone, preferences, satisfaction).
+
+The dependency-free default works offline on a phone; an optional embedder can be
+plugged into :class:`SemanticMemory` for vector search.
+"""
+
+from __future__ import annotations
+
+from src.memory.base import (
+    Clock,
+    MemoryKind,
+    MemoryRecord,
+    MemoryStore,
+    connect,
+    default_memory_path,
+    utc_iso,
+)
+from src.memory.emotional import EmotionalMemory, analyze_tone
+from src.memory.episodic import EpisodicMemory
+from src.memory.manager import MemoryManager
+from src.memory.procedural import ProceduralMemory
+from src.memory.semantic import Embedder, SemanticMemory
+
+__all__ = [
+    "Clock",
+    "Embedder",
+    "EmotionalMemory",
+    "EpisodicMemory",
+    "MemoryKind",
+    "MemoryManager",
+    "MemoryRecord",
+    "MemoryStore",
+    "ProceduralMemory",
+    "SemanticMemory",
+    "analyze_tone",
+    "connect",
+    "default_memory_path",
+    "utc_iso",
+]
