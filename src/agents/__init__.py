@@ -26,6 +26,7 @@ from src.agents.researcher import ResearcherAgent
 from src.agents.reviewer import ReviewerAgent
 from src.agents.security_auditor import SecurityAuditorAgent
 from src.agents.state import AgentState, AgentStatus
+from src.agents.sub_agent import SubAgent, SubAgentRunner, SubAgentSpec
 from src.agents.tester import TesterAgent
 from src.core.backend import LLMBackend
 
@@ -38,6 +39,9 @@ __all__ = [
     "AgentMetrics",
     "AgentCommunication",
     "Envelope",
+    "SubAgent",
+    "SubAgentRunner",
+    "SubAgentSpec",
     "AGENT_GROUPS",
     "AGENT_CLASSES",
     "all_agents",

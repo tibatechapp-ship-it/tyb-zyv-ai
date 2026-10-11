@@ -6,6 +6,13 @@ from __future__ import annotations
 
 from src.core.backend import EchoBackend, LLMBackend
 from src.core.logging_utils import JsonFormatter, setup_json_logging
+from src.core.model_router import (
+    DEFAULT_PROFILES,
+    ModelProfile,
+    ModelRouter,
+    ModelTier,
+    RoutingDecision,
+)
 from src.core.resilience import (
     BackendUnavailable,
     CommandQueue,
@@ -25,6 +32,11 @@ __all__ = [
     "LLMBackend",
     "Message",
     "AgentResult",
+    "DEFAULT_PROFILES",
+    "ModelProfile",
+    "ModelRouter",
+    "ModelTier",
+    "RoutingDecision",
     "ZyvoBackend",
     "ZyvoClient",
     "ZyvoError",

@@ -170,6 +170,43 @@ incoming .oga voice note
 
 ---
 
+## Smart routing, tool schemas and sub-agents (Phase 7)
+
+Three pure, offline modules let agents pick models, declare tools and spawn
+restricted children — no network involved:
+
+- **`src/core/model_router.py`** — `ModelRouter` estimates task complexity
+  deterministically (length + cue words + questions + code) and maps it to a
+  `ModelTier` (`fast` / `balanced` / `powerful`), then returns the *cheapest*
+  `ModelProfile` in that tier. `route(task, tier=…, strength="coding")` narrows
+  by a required strength; explicit `complexity`/`tier` overrides the heuristic.
+  Models are `ModelProfile` records (context window, cost, strengths).
+- **`src/tools/schemas.py`** — `ToolSchema` + `ToolParameter` are frozen
+  descriptions of callable tools. They render to OpenAI (`{"type": "function"}`)
+  and Anthropic (`input_schema`) shapes, and `validate_arguments()` checks a
+  proposed call (required fields, types, enums, unknown keys) before anything
+  runs. `ToolRegistry` is a thread-safe per-name catalogue with renderers.
+- **`src/agents/sub_agent.py`** — `SubAgentRunner` spawns a `SubAgent` (a
+  tool-restricted child) under a parent agent. The child may only use tools the
+  parent holds (else `ValueError`), nesting is capped by `max_depth` (deeper
+  spawns return a failed result instead of recursing), and an optional
+  `ModelRouter` picks the child's model from the task. Returns a normal
+  `AgentResult`.
+
+```python
+from src.core import ModelRouter
+from src.tools import ToolSchema, ToolParameter
+from src.agents import SubAgentRunner
+
+router = ModelRouter()
+decision = router.route("refactor the concurrency layer")   # -> balanced tier
+schemas = [ToolSchema("write_file", parameters=(ToolParameter("path", "string", required=True),))]
+runner = SubAgentRunner(backend, router=router, max_depth=2)
+result = runner.spawn(architect, role="linter", task="lint main.py")  # tools ⊆ parent's
+```
+
+---
+
 ## Extending it
 
 - **New input channel?** (Slack, Matrix, a web UI) — you only need to produce a

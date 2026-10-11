@@ -45,10 +45,17 @@ bonus fuzz, chaos. Run: `python -m pytest tests/adversarial/ -v`.
 
 ## Architecture (key files)
 - `src/core/` — types.py (Message/AgentResult), backend.py (LLMBackend
-  protocol + EchoBackend for offline tests), resilience.py, watchdog.py,
-  zyvo_client.py (ZyvoBackend → local HTTP 127.0.0.1).
-- `src/agents/` — base.py (BaseAgent: metadata + run loop), registry.py,
-  state.py, metrics.py, communication.py + **20 built-in agents**
+  protocol + EchoBackend for offline tests), model_router.py (ModelRouter/
+  ModelTier/ModelProfile/RoutingDecision: deterministic complexity heuristic ->
+  tier -> cheapest fit; strength filter + explicit override), resilience.py,
+  watchdog.py, zyvo_client.py (ZyvoBackend → local HTTP 127.0.0.1).
+- `src/tools/` — schemas.py (ToolParameter/ToolSchema frozen tool descriptions;
+  to_json_schema/to_openai/to_anthropic renderers; validate_arguments incl.
+  required/type/enum/unknown keys; ToolRegistry thread-safe catalogue).
+- `src/agents/` — base.py (BaseAgent: metadata + run loop), sub_agent.py
+  (SubAgent tool-restricted child + SubAgentRunner: tools ⊆ parent's (else
+  ValueError), max_depth guard, optional ModelRouter for child model),
+  registry.py, state.py, metrics.py, communication.py + **20 built-in agents**
   (core/planning/quality/ops, 5 each). `__init__.py` exposes `AGENT_CLASSES`
   and `all_agents(backend)` — the one-call factory for the full team.
 - `src/patterns/` — supervisor, pipeline, fanout, delegation, blackboard.
@@ -216,6 +223,11 @@ bonus fuzz, chaos. Run: `python -m pytest tests/adversarial/ -v`.
   consolidation touches only the related entry. Manager gains `anti_forgetting=`
   + `LearningCycle.conflicts`. Added `if TYPE_CHECKING:` to coverage
   `exclude_lines`. 977 tests, 99.04% cov.
+- 2026-10-11: Phase 7 — ModelRouter (deterministic complexity heuristic → tier
+  → cheapest profile; strength filter), src/tools/schemas.py (ToolSchema frozen
+  schemas + renderers to OpenAI/Anthropic + argument validation + ToolRegistry),
+  sub_agent.py (SubAgentRunner: tools ⊆ parent's, max_depth guard, optional
+  router for the child model). 1027 tests, 99.09% cov.
 - Lesson: pytest `python_classes=Test*` collects agent class `TesterAgent`/alias
   `Tester` → PytestCollectionWarning. Never import `TesterAgent` under a
   Test-prefixed name in tests; use `AGENT_CLASSES` or alias it (e.g. `as QA`).
