@@ -6,8 +6,9 @@ data layer; later phases add the learning itself.
 
 ```
 src/learning/
-├── __init__.py             # Experience, Outcome, ExperienceCollector, KNOWN_*
-└── experience_collector.py # the in-memory buffer, queries, stats, IO, pruning
+├── __init__.py             # Experience, Outcome, ExperienceCollector, Lesson, LessonExtractor, KNOWN_*
+├── experience_collector.py # the in-memory buffer, queries, stats, IO, pruning
+└── lesson.py               # Lesson + LessonExtractor (Phase 2)
 ```
 
 ## Experience — one recorded action
@@ -106,12 +107,75 @@ The collector is the *working* buffer for one process — cheap and fast. The
 long-lived record of episodes already lives in `src.memory` (the episodic
 store), so nothing here needs a database.
 
+## Lessons (Phase 2) — principles from experiences
+
+A `Lesson` is a reusable principle distilled from one or more experiences, e.g.
+*"When deploying at night, always run the test suite first because failures cost
+a whole release"*.
+
+```python
+from src.core.backend import EchoBackend
+from src.learning import ExperienceCollector, LessonExtractor
+
+collector = ExperienceCollector()
+collector.record("task-42", "step-1", "coder", "write_file",
+                 Outcome.FAILURE, action="night deploy", result="exit 1")
+
+extractor = LessonExtractor(backend, collector)   # any LLMBackend
+extractor.extract_from_failure(exp)   # -> Lesson | None
+extractor.extract_from_success(exp)   # -> Lesson | None
+extractor.extract_batch(experiences)  # -> list[Lesson] (merged/deduped)
+extractor.extract_from_task("task-42")  # -> list[Lesson] (oldest-first)
+```
+
+The extractor asks the backend for **one** principle as JSON
+(`{"principle", "context", "confidence", "tags"}`), using the prompt format
+*"When [context], always/never [action] because [reason]"*. It is deliberately
+**tolerant**:
+
+* a reply that is not valid JSON, a blank principle, a fenced ```json block, or
+  a backend error → `None` (one bad call never kills a batch);
+* `confidence` is clamped to `[0, 1]`; missing fields default sanely.
+
+### Lesson fields
+
+| Field | Meaning |
+|-------|---------|
+| `id` | UUID (fresh, incl. for merged lessons) |
+| `principle` | the general rule |
+| `context` | when it applies |
+| `confidence` | 0.0–1.0 (see below) |
+| `evidence` | `("task_id:step_id", ...)` the lesson rests on |
+| `source_outcome` | `Outcome.SUCCESS` / `FAILURE` (dominant when merged) |
+| `created_at` | clock time |
+| `agent_role` | the source agent (dominant when merged) |
+| `tags` | `frozenset[str]` for classification |
+
+`Lesson.to_dict()` / `Lesson.from_dict()` round-trip it (JSON-safe).
+
+### Confidence
+
+The model's estimate is adjusted deterministically so equal inputs score equal:
+`confidence = base + min(0.2, (evidence−1)·0.05) − (0.25 if contradictory)`.
+Repetition (more supporting experiences) raises it, capped at +0.2;
+contradiction (the same principle seen with **both** success *and* failure)
+lowers it.
+
+### Deduplication
+
+`extract_batch` merges lessons whose principles are similar — identical token
+sets or token **Jaccard ≥ 0.6**. A merged lesson keeps the first principle, the
+union of evidence and tags, the most common agent/outcome, the latest
+`created_at`, and re-scores confidence on the merged evidence.
+
 ## Roadmap
 
 - **Phase 1 (done)** — collector core: record / all / len / clear.
-- **Phase 1.5 (done)** — queries (get_by_agent / get_by_action / get_by_outcome
-  / search), statistics, JSON + JSONL export/import, retention pruning,
-  fail-safe `record` with KNOWN_* validators.
-- **Phase 2** — turn batches of experiences into rules / adjustments
-  (e.g. outcome-weighted statistics per action type).
-- **Phase 3** — feed the learned rules back into agent decisions.
+- **Phase 1.5 (done)** — queries, statistics, JSON + JSONL export/import,
+  retention pruning, fail-safe `record` with KNOWN_* validators.
+- **Phase 2 (done)** — `LessonExtractor`: LLM-backed principle extraction
+  (`extract_from_failure` / `extract_from_success` / `extract_batch` /
+  `extract_from_task`), tolerant JSON parsing, confidence scoring,
+  similarity-based deduplication.
+- **Phase 3** — feed the learned lessons back into agent decisions
+  (prompt injection / a lesson store).

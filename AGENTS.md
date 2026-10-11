@@ -65,6 +65,14 @@ bonus fuzz, chaos. Run: `python -m pytest tests/adversarial/ -v`.
   (newest-first, limit=50, RLock snapshots). Docs: `docs/LEARNING.md`. Tests:
   `tests/test_learning_experience_collector.py` (43). Long-term storage stays
   in `src.memory`; the collector is the working in-process buffer.
+- `src/learning/lesson.py` — Phase 2 `Lesson` (frozen: id/principle/context/
+  confidence/evidence/source_outcome/created_at/agent_role/tags + to_dict/
+  from_dict) + `LessonExtractor(backend, collector, clock=)`:
+  extract_from_failure/_success/_batch/_task. Prompt asks for ONE JSON principle
+  ("When [ctx], always/never [action] because [reason]"); tolerant parse (None on
+  bad JSON/backend error/blank); confidence = base + min(.2,(n-1)*.05) − .25 if
+  contradictory, clamped [0,1]; dedup by token Jaccard ≥ 0.6. Evidence =
+  "task_id:step_id" (experiences have no id). Tests: `tests/test_learning_lesson.py`.
 - `src/memory/` — persistent memory, plain SQLite, no deps (6 phases done):
   base.py (connect/MemoryRecord/MemoryStore+RLock/Clock), embeddings.py
   (HashingEmbedder/cosine), episodic.py, semantic.py (optional injectable
@@ -116,10 +124,14 @@ bonus fuzz, chaos. Run: `python -m pytest tests/adversarial/ -v`.
   verify before assuming past work exists. 822 tests (18 new), 98.7% cov.
 - 2026-10-11: learning Phase 1.5 completed (2nd round): `record()` now takes
   task_id/step_id and FAILS on blank ids or roles/actions outside
-  KNOWN_AGENT_ROLES/KNOWN_ACTION_TYPES (ValueError + logger warning; canonical
+   KNOWN_AGENT_ROLES/KNOWN_ACTION_TYPES (ValueError + logger warning; canonical
   lowercase only); `stats()` → rates + Counter desc + time_range;
   export/import JSON + JSONL (invalid items skipped, never fatal);
   prune/prune_by_outcome retention. 847 tests, ~98.7% cov.
+- 2026-10-11: learning Phase 2 — `LessonExtractor` (LLM-backed principles) with
+  tolerant JSON parsing, deterministic confidence scoring, similarity dedup.
+  LLMBackend.generate(messages: Sequence[Message], *, model=None) -> str is the
+  contract (stubbed offline in tests). 869 tests, ~98.8% cov.
 - Lesson: pytest `python_classes=Test*` collects agent class `TesterAgent`/alias
   `Tester` → PytestCollectionWarning. Never import `TesterAgent` under a
   Test-prefixed name in tests; use `AGENT_CLASSES` or alias it (e.g. `as QA`).
