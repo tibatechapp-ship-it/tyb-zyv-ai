@@ -115,7 +115,7 @@ bonus fuzz, chaos. Run: `python -m pytest tests/adversarial/ -v`.
   every method with one `threading.Lock` and `__iter__` returns a snapshot. Lock
   order is fixed registry→metrics. `tests/test_concurrency.py` (11 tests: 100-thread
   races, deadlock, lock-ordering, benchmark). 615 tests, 98.5% cov.
-- 2026-10-11: version lives in pyproject.toml AND src/__init__.py (both 2.4.0).
+- 2026-10-11: version lives in pyproject.toml AND src/__init__.py (both 2.5.0).
 - 2026-10-11: git push via `gh` credential helper; releases via `gh release create`.
 - 2026-10-11: memory system Phase 1 shipped (`src/memory/`, v2.5.0 target):
   four stores over ONE SQLite DB + MemoryManager (sessions, context, export/
