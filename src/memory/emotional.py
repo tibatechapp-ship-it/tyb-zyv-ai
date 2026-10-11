@@ -2,13 +2,17 @@
 
 This store keeps three related things:
 
-* **preferences** — how the user likes things (subject → key → value);
+* **preferences** — how the user likes things (key → value + confidence);
 * **signals** — a log of detected tone in user messages;
 * **satisfaction** — a 0.0–1.0 score per interaction.
 
 Tone is detected with a small, dependency-free bilingual lexicon
-(English + common Arabic cues). Phase 5 can swap in a real sentiment model via
-the same :func:`analyze_tone` seam without touching callers.
+(English + common Arabic cues) that also understands simple negation
+("not good" is negative). :meth:`EmotionalMemory.adjust_reply` uses the tone and
+the stored preferences to soften or warm up a reply automatically.
+
+A real sentiment model can replace :func:`analyze_tone` later without touching
+callers.
 """
 
 from __future__ import annotations
@@ -16,10 +20,11 @@ from __future__ import annotations
 import re
 import sqlite3
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 from src.memory.base import MemoryKind, MemoryRecord, MemoryStore, utc_iso
 
-__all__ = ["EmotionalMemory", "analyze_tone"]
+__all__ = ["EmotionalMemory", "Tone", "analyze_tone", "classify"]
 
 _WORD = re.compile(r"\w+", re.UNICODE)
 
@@ -33,32 +38,85 @@ POSITIVE_WORDS: frozenset[str] = frozenset(
 NEGATIVE_WORDS: frozenset[str] = frozenset(
     {
         "bad", "wrong", "broken", "hate", "terrible", "awful", "useless", "error",
-        "fail", "failed", "no", "slow", "confusing", "mesh", "zafta", "sayea",
-        "ghalat", "mush", "batel",
+        "fail", "failed", "no", "slow", "confusing", "zafta", "sayea", "ghalat",
+        "batel",
     }
 )
+#: Words that flip the polarity of the next sentiment word.
+_NEGATORS: frozenset[str] = frozenset(
+    {"not", "never", "dont", "didnt", "cant", "cannot", "mesh", "mush", "mish"}
+)
+
+#: Default reply prefixes/suffixes applied by :meth:`EmotionalMemory.adjust_reply`.
+_DEFAULT_PREFIX: dict[str, str] = {
+    "positive": "",
+    "neutral": "",
+    "negative": "Sorry about that — ",
+}
+_DEFAULT_SUFFIX: dict[str, str] = {"positive": "", "neutral": "", "negative": ""}
+
+
+@dataclass(frozen=True, slots=True)
+class Tone:
+    """A detected tone: a ``label`` and a score in ``[-1, 1]``."""
+
+    label: str
+    score: float
+
+    @property
+    def is_negative(self) -> bool:
+        """Whether the tone is negative."""
+        return self.label == "negative"
+
+    @property
+    def is_positive(self) -> bool:
+        """Whether the tone is positive."""
+        return self.label == "positive"
 
 
 def analyze_tone(text: str) -> tuple[str, float]:
     """Classify ``text`` as ``positive``/``negative``/``neutral`` + score.
 
     The score is ``(positives - negatives) / total_hits`` clamped to [-1, 1];
-    with no hits the label is ``neutral`` and the score is ``0.0``.
+    a negator in front of a sentiment word flips its polarity. With no hits the
+    label is ``neutral`` and the score is ``0.0``.
     """
-    words = [word for word in _WORD.findall(text.lower())]
+    words = _WORD.findall(text.lower())
     if not words:
         return "neutral", 0.0
-    positives = sum(1 for word in words if word in POSITIVE_WORDS)
-    negatives = sum(1 for word in words if word in NEGATIVE_WORDS)
-    hits = positives + negatives
+    total = 0
+    hits = 0
+    negate = False
+    for word in words:
+        if word in _NEGATORS:
+            negate = True
+            continue
+        if word in POSITIVE_WORDS:
+            polarity = 1
+        elif word in NEGATIVE_WORDS:
+            polarity = -1
+        else:
+            negate = False
+            continue
+        if negate:
+            polarity = -polarity
+            negate = False
+        total += polarity
+        hits += 1
     if hits == 0:
         return "neutral", 0.0
-    score = (positives - negatives) / hits
+    score = max(-1.0, min(1.0, total / hits))
     if score > 0.0:
         return "positive", score
     if score < 0.0:
         return "negative", score
     return "neutral", 0.0
+
+
+def classify(text: str) -> Tone:
+    """Return the :class:`Tone` of ``text``."""
+    label, score = analyze_tone(text)
+    return Tone(label=label, score=score)
 
 
 class EmotionalMemory(MemoryStore):
@@ -194,6 +252,44 @@ class EmotionalMemory(MemoryStore):
             for row in rows
         ]
 
+    def observe(self, text: str, *, session_id: str | None = None) -> tuple[str, float]:
+        """Classify ``text`` and log it as a signal; return ``(label, score)``."""
+        label, score = analyze_tone(text)
+        self.record_signal(text, sentiment=label, score=score, session_id=session_id)
+        return label, score
+
+    def dominant_tone(self, *, limit: int = 50) -> str:
+        """The most frequent recent tone label (``neutral`` when undecided)."""
+        counts: dict[str, int] = {}
+        for record in self.signals(limit=limit):
+            label = str(record.data["sentiment"])
+            counts[label] = counts.get(label, 0) + 1
+        if not counts:
+            return "neutral"
+        return max(counts, key=lambda label: (counts[label], label))
+
+    # -- adjust replies ----------------------------------------------------
+    def adjust_reply(
+        self,
+        reply: str,
+        *,
+        user_tone: Tone | str | None = None,
+        user_text: str | None = None,
+    ) -> str:
+        """Adapt ``reply`` to the user's tone using stored preferences.
+
+        Tone is taken from ``user_tone`` (a :class:`Tone` or label) or detected
+        from ``user_text``. A per-tone ``reply_prefix_<label>`` /
+        ``reply_suffix_<label>`` preference overrides the built-in default.
+        """
+        tone = _resolve_tone(user_tone, user_text)
+        label = tone.label
+        prefix = self.preference(f"reply_prefix_{label}")
+        if prefix is None:
+            prefix = _DEFAULT_PREFIX.get(label, "")
+        suffix = self.preference(f"reply_suffix_{label}") or _DEFAULT_SUFFIX.get(label, "")
+        return f"{prefix}{reply}{suffix}"
+
     # -- satisfaction ------------------------------------------------------
     def record_satisfaction(
         self,
@@ -241,6 +337,11 @@ class EmotionalMemory(MemoryStore):
             for row in rows
         ]
 
+    def latest_satisfaction(self) -> float | None:
+        """The most recent satisfaction score, or ``None``."""
+        found = self.satisfaction(limit=1)
+        return float(found[0].data["score"]) if found else None
+
     def average_satisfaction(self) -> float | None:
         """Mean satisfaction across all records, or ``None`` when empty."""
         row = self._query_one("SELECT AVG(score) AS avg FROM satisfaction")
@@ -248,9 +349,19 @@ class EmotionalMemory(MemoryStore):
             return None
         return float(row["avg"])
 
-    # -- convenience -------------------------------------------------------
-    def observe(self, text: str, *, session_id: str | None = None) -> tuple[str, float]:
-        """Classify ``text`` and log it as a signal; return ``(label, score)``."""
-        label, score = analyze_tone(text)
-        self.record_signal(text, sentiment=label, score=score, session_id=session_id)
-        return label, score
+
+_LABEL_SCORES = {"positive": 1.0, "negative": -1.0, "neutral": 0.0}
+
+
+def _resolve_tone(user_tone: Tone | str | None, user_text: str | None) -> Tone:
+    """Coerce the various tone inputs into a :class:`Tone`."""
+    if isinstance(user_tone, Tone):
+        return user_tone
+    if isinstance(user_tone, str):
+        label = user_tone.strip().lower()
+        if label in _LABEL_SCORES:
+            return Tone(label, _LABEL_SCORES[label])
+        return classify(user_tone)
+    if user_text is not None:
+        return classify(user_text)
+    return Tone("neutral", 0.0)

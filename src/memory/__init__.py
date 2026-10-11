@@ -24,7 +24,7 @@ from src.memory.base import (
     utc_iso,
 )
 from src.memory.embeddings import Embedder, HashingEmbedder, cosine, make_embedder
-from src.memory.emotional import EmotionalMemory, analyze_tone
+from src.memory.emotional import EmotionalMemory, Tone, analyze_tone, classify
 from src.memory.episodic import EpisodicMemory, EventKind
 from src.memory.manager import MemoryManager
 from src.memory.procedural import ProceduralMemory, Skill, SkillsRegistry
@@ -45,7 +45,9 @@ __all__ = [
     "SemanticMemory",
     "Skill",
     "SkillsRegistry",
+    "Tone",
     "analyze_tone",
+    "classify",
     "connect",
     "cosine",
     "default_memory_path",
