@@ -1,6 +1,6 @@
 [project]
 name = "tyb-zyv-ai"
-version = "1.1.0"
+version = "2.1.0"
 description = "AI-powered assistants for Termux"
 readme = "README.md"
 requires-python = ">=3.11"

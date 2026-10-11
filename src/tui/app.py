@@ -34,7 +34,9 @@ class ZyvoTUI(App[None]):
         backend: LLMBackend | None = None,
     ) -> None:
         super().__init__()
-        self.state = TuiState(registry or AgentRegistry(), backend)
+        # When no registry is given, TuiState auto-registers the 20 built-ins
+        # (it needs a backend to instantiate them).
+        self.state = TuiState(registry, backend)
 
     # -- screen actions ----------------------------------------------------
     def on_mount(self) -> None:

@@ -53,6 +53,50 @@ leaves your device except what you explicitly ask the model to do.
 - **Structured logging.** One JSON object per line, rotating daily (`logging_utils`).
 - **Watchdog + heartbeat.** Restarts the service when it dies and pings Telegram every five minutes (`Watchdog`/`Heartbeat`, `scripts/health_monitor.py`).
 
+### `src/agents` + `src/tui` — the 20-agent framework
+A multi-agent layer over ZYVO: every agent is a specialised persona (system
+prompt + tools + permissions) running on a shared `LLMBackend`. Build the
+full team with one call, **no live server needed**:
+
+```python
+from src.agents import all_agents
+from src.core.backend import EchoBackend
+
+agents = all_agents(EchoBackend())   # 20 agents, grouped: core · planning · quality · ops
+```
+
+| Agent | Group | Role |
+|-------|-------|------|
+| Architect | core | Designs system architecture, components and data flow |
+| Coder | core | Writes clean, tested implementation code |
+| Reviewer | core | Reviews code for correctness, style and clarity |
+| Tester | core | Writes and runs tests; reports coverage honestly |
+| Debugger | core | Diagnoses failures and proposes minimal fixes |
+| Planner | planning | Breaks goals into ordered, testable tasks |
+| Analyst | planning | Analyses requirements, constraints and assumptions |
+| Researcher | planning | Gathers current, source-backed information |
+| Designer | planning | Designs UI/UX, schemas and APIs |
+| Estimator | planning | Estimates effort, cost and risk with ranges |
+| SecurityAuditor | quality | Audits code and config for vulnerabilities |
+| Performance | quality | Finds and removes performance bottlenecks |
+| Documentation | quality | Writes user and developer documentation |
+| Refactor | quality | Restructures code without changing behaviour |
+| Compliance | quality | Checks licences, policies and legal constraints |
+| Orchestrator | ops | Coordinates agents and pipelines to the goal |
+| DevOps | ops | Builds, deploys and provisions infrastructure |
+| Monitor | ops | Watches health signals and alerts on anomalies |
+| Recovery | ops | Restores service after failures |
+| Reporter | ops | Summarises outcomes for the human |
+
+`TuiState` (and the Textual TUI) auto-register all 20 when given a backend:
+
+```bash
+pip install ".[tui]"
+python -c "from src.core.backend import EchoBackend; from src.tui.app import run_app; run_app(backend=EchoBackend())"
+```
+
+The `TUI`'s subtitle says "20-agent console" — because now it is one.
+
 ---
 
 ## Requirements

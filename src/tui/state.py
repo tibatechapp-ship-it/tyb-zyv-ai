@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
+from src.agents import all_agents
 from src.agents.registry import AgentRegistry
 from src.core.backend import LLMBackend
 from src.core.types import AgentResult
@@ -33,7 +34,10 @@ class TaskRecord:
 class TuiState:
     """Holds everything the views render: registry, tasks, logs, counters."""
 
-    def __init__(self, registry: AgentRegistry, backend: LLMBackend | None = None) -> None:
+    def __init__(self, registry: AgentRegistry | None = None, backend: LLMBackend | None = None) -> None:
+        # No registry given but a backend is: auto-register the 20 built-ins.
+        if registry is None:
+            registry = AgentRegistry(all_agents(backend)) if backend is not None else AgentRegistry()
         self.registry = registry
         self.backend = backend
         self.tasks: list[TaskRecord] = []
