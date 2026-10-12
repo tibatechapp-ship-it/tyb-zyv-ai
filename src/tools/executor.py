@@ -35,6 +35,7 @@ __all__ = [
     "SAFE_TOOL_NAMES",
     "ToolCall",
     "ToolOutcome",
+    "ToolPolicy",
     "ToolRun",
     "parse_tool_calls",
 ]
@@ -101,6 +102,21 @@ class ToolRun:
             "outcomes": [outcome.to_dict() for outcome in self.outcomes],
             "steps": self.steps,
         }
+
+
+@dataclass(frozen=True, slots=True)
+class ToolPolicy:
+    """Configuration for running agents with real tool execution.
+
+    Handed to a coordination pattern (or passed straight to
+    :meth:`BaseAgent.run_with_tools`) to turn each stage from a single backend
+    call into the bounded ReAct loop in :class:`LocalToolExecutor`. ``root``
+    confines every read-only tool to one workspace directory.
+    """
+
+    root: str | Path | None = None
+    max_steps: int = 5
+    max_calls_per_step: int = 5
 
 
 def parse_tool_calls(text: str) -> list[ToolCall]:

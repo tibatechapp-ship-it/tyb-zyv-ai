@@ -300,6 +300,17 @@ bonus fuzz, chaos. Run: `python -m pytest tests/adversarial/ -v`.
 - 2026-10-12: released **v3.1.0** (Phase 10 security TUI screen + zip-bomb fix +
   real tool executor `src/tools/executor.py` + reviews/docs). Version bumped in
   both pyproject.toml and src/__init__.py. 1162 tests @ 99.09%.
+- 2026-10-12: **wired tool execution into the coordination patterns** — released
+  as **v3.2.0** (version bumped in both pyproject.toml and src/__init__.py):
+  `ToolPolicy(root, max_steps, max_calls_per_step)` (frozen, in `src/tools/
+  executor.py`, exported from `src.tools`); `src/patterns/_stage.py`
+  (`run_stage` → `StageOutcome(result, tool_run)`). `Supervisor/Pipeline/Fanout/
+  Delegation` take an optional `tools: ToolPolicy | None`; `None` = the old
+  single-`run()` behaviour byte-for-byte. With a policy each stage runs
+  `run_with_tools`, traces surface as `SupervisorReport.tool_runs` /
+  `Pipeline|Fanout|Delegation.tool_runs`; return types unchanged (still
+  `AgentResult`-based) so every existing caller/tests keep working.
+  `tests/test_patterns_tools.py` (13). 1175 tests @ 99.10%; all patterns 100%.
 
 - Lesson: pytest `python_classes=Test*` collects agent class `TesterAgent`/alias
   `Tester` → PytestCollectionWarning. Never import `TesterAgent` under a

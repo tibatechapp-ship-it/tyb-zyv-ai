@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 
 from src.agents.base import BaseAgent
 from src.core.types import AgentResult
+from src.patterns._stage import run_stage
+from src.tools.executor import ToolPolicy, ToolRun
 
 __all__ = ["Supervisor", "SupervisorReport"]
 
@@ -17,6 +19,8 @@ class SupervisorReport:
 
     task: str
     results: list[AgentResult] = field(default_factory=list)
+    #: One entry per result that ran with tools (empty when no ToolPolicy is set).
+    tool_runs: list[ToolRun] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
@@ -35,8 +39,11 @@ class SupervisorReport:
 class Supervisor:
     """Runs every delegate over the same task and collects their results."""
 
-    def __init__(self, agents: Iterable[BaseAgent]) -> None:
+    def __init__(
+        self, agents: Iterable[BaseAgent], *, tools: ToolPolicy | None = None
+    ) -> None:
         self._agents: list[BaseAgent] = list(agents)
+        self._tools = tools
 
     @property
     def agents(self) -> Sequence[BaseAgent]:
@@ -45,5 +52,9 @@ class Supervisor:
     def run(self, task: str, *, context: str = "") -> SupervisorReport:
         report = SupervisorReport(task=task)
         for agent in self._agents:
-            report.results.append(agent.run(task, context=context))
+            outcome = run_stage(agent, task, context=context, tools=self._tools)
+            report.results.append(outcome.result)
+            if outcome.tool_run is not None:
+                report.tool_runs.append(outcome.tool_run)
         return report
+

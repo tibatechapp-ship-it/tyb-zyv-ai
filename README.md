@@ -121,6 +121,24 @@ the agent's own `tools`. Anything that mutates the system or runs a shell
 server, behind its permission gate. The split keeps the phone safe while still
 letting agents *do* things.
 
+The coordination patterns speak the same language. Pass a `ToolPolicy` and every
+stage runs the tool loop instead of a single call — the traces come back on the
+report / pattern:
+
+```python
+from src.patterns import Pipeline
+from src.tools import ToolPolicy
+
+pipe = Pipeline([architect, coder, reviewer], tools=ToolPolicy(root="."))
+result = pipe.run("read the spec and implement it")
+print(result.output, [len(run.outcomes) for run in pipe.tool_runs])
+```
+
+`Supervisor` exposes them as `report.tool_runs`; `Pipeline`, `Fanout` and
+`Delegation` as a `tool_runs` attribute. With no `ToolPolicy` the patterns behave
+exactly as before (a single `run()` per stage).
+
+
 ### `src/security` — offline static security scanner
 A deterministic, dependency-free scanner for source trees. Eight agents (
 secrets · injection · traversal · crypto · deserialization · network ·
