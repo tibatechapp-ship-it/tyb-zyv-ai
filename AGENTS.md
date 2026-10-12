@@ -265,6 +265,8 @@ bonus fuzz, chaos. Run: `python -m pytest tests/adversarial/ -v`.
   `SecurityAgent.path_filter` is a real overridable METHOD (was a `staticmethod`
   lambda that tripped mypy: "Invalid self argument"). Docs: `docs/SECURITY.md`.
   1077 tests, 99% cov (security/* 100%).
+- 2026-10-12: released **v3.0.0** (continual learning Phases 4-6 + model router/
+  tools/sub-agents Phase 7 + context manager Phase 8 + security scanner Phase 9).
 - Lesson: pytest `python_classes=Test*` collects agent class `TesterAgent`/alias
   `Tester` → PytestCollectionWarning. Never import `TesterAgent` under a
   Test-prefixed name in tests; use `AGENT_CLASSES` or alias it (e.g. `as QA`).
