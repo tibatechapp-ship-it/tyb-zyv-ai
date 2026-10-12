@@ -138,6 +138,43 @@ print(result.output, [len(run.outcomes) for run in pipe.tool_runs])
 `Delegation` as a `tool_runs` attribute. With no `ToolPolicy` the patterns behave
 exactly as before (a single `run()` per stage).
 
+#### Streaming, resumption and the tool-runs view
+
+**Streaming.** A backend that implements `stream() -> Iterator[str]` is given the
+word as it is produced; a plain backend is called once and the whole reply is
+yielded as one chunk — so streaming never breaks a non-streaming backend.
+`BaseAgent.stream()` is the agent-side entry point: it never raises, records
+metrics exactly like `run()`, and the final chunk carries the assembled
+`AgentResult`.
+
+```python
+from src.core.backend import EchoBackend
+from src.agents import all_agents
+
+agent = all_agents(EchoBackend())["coder"]
+for chunk in agent.stream("write a one-line summary of this task"):
+    print(chunk.delta, end="", flush=True)
+```
+
+**Resumption.** A long `Pipeline` survives interruptions: pass a
+`CheckpointStore` and a `run_id`, and each finished stage is saved. Resuming with
+the same `run_id` reuses the stages that already succeeded (their saved output
+still chains into the next one) and retries only what was still pending — failed
+stages are never frozen in.
+
+```python
+from src.patterns import CheckpointStore, Pipeline
+
+store = CheckpointStore("~/.local/share/tyb-zyv-ai/pipeline-cp.json")
+pipe = Pipeline([architect, coder, reviewer], checkpoints=store)
+result = pipe.run("implement the spec", run_id="spec-1")   # resume-safe
+```
+
+**Tool-runs view.** The TUI records every tool-using run: `TuiState` keeps
+`tool_runs`, each task shows its tool-call count, and `ctrl+t` / `:tools` opens a
+table of every call — agent, tool, success and the result. Hand a `ToolPolicy` to
+`TuiState(...)` to make every console run go through the tool loop.
+
 
 ### `src/security` — offline static security scanner
 A deterministic, dependency-free scanner for source trees. Eight agents (
@@ -309,3 +346,11 @@ Released under the [MIT License](LICENSE).
 ZYVO itself is a separate project by
 [zyvo9](https://github.com/zyvo9) released under its own license; this repository
 only provides front-end assistants that talk to it.
+
+---
+
+## Archived (2026-10-12)
+
+This repository has been **archived**. All features (incl. the v3.3.0 Phase-11 streaming/checkpoint/TUI-tool-traces work) are merged into the unified project:
+
+**https://github.com/tibatechapp-ship-it/nexus-core** — "Unified AI Agent System: Memory + Learning + Security + 20 Agents"
