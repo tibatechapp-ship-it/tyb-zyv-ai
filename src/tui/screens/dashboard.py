@@ -28,6 +28,7 @@ class DashboardScreen(Screen[None]):
         ("t", "app.show_tasks", "Tasks"),
         ("m", "app.show_monitor", "Monitor"),
         ("l", "app.show_logs", "Logs"),
+        ("s", "app.show_security", "Security"),
         ("question_mark", "app.show_help", "Help"),
     ]
 
@@ -72,6 +73,7 @@ class DashboardScreen(Screen[None]):
             "monitor": self.zyvo.action_show_monitor,
             "logs": self.zyvo.action_show_logs,
             "lessons": self.zyvo.action_show_lessons,
+            "security": self.zyvo.action_show_security,
             "help": self.zyvo.action_show_help,
             "quit": self.zyvo.exit,
         }

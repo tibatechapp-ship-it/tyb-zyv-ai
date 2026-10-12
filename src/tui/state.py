@@ -10,6 +10,7 @@ from src.agents.registry import AgentRegistry
 from src.core.backend import LLMBackend
 from src.core.types import AgentResult
 from src.learning import LessonStore
+from src.security import SecurityOrchestrator
 
 __all__ = ["TaskRecord", "TuiState"]
 
@@ -41,6 +42,7 @@ class TuiState:
         backend: LLMBackend | None = None,
         *,
         lesson_store: LessonStore | None = None,
+        security_orchestrator: SecurityOrchestrator | None = None,
     ) -> None:
         # No registry given but a backend is: auto-register the 20 built-ins.
         if registry is None:
@@ -50,6 +52,10 @@ class TuiState:
         # The learned principles shown in the Lessons view. Empty by default;
         # callers can hand in a pre-populated store (e.g. loaded from SQLite).
         self.lesson_store = lesson_store if lesson_store is not None else LessonStore()
+        # The security scanner driving the Security view (offline static scan).
+        self.security_orchestrator = (
+            security_orchestrator if security_orchestrator is not None else SecurityOrchestrator()
+        )
         self.tasks: list[TaskRecord] = []
         self.logs: list[dict[str, str]] = []
         self.llm_calls = 0

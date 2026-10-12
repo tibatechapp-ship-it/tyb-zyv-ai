@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 
-from textual.widgets import Input
+import pytest
+from textual.widgets import Button, Input
 
 from src.agents.base import BaseAgent
 from src.agents.registry import AgentRegistry
@@ -18,6 +20,7 @@ from src.tui.screens.help import HelpScreen
 from src.tui.screens.lessons import LessonsScreen
 from src.tui.screens.logs import LogsScreen
 from src.tui.screens.monitor import MonitorScreen
+from src.tui.screens.security import SecurityScreen
 from src.tui.screens.tasks import TasksScreen
 from src.tui.state import TuiState
 from src.tui.widgets.agent_list import AgentListPanel
@@ -370,3 +373,200 @@ def test_run_app_with_registry(monkeypatch) -> None:
     monkeypatch.setattr(ZyvoTUI, "run", lambda self: captured.update(ok=True))
     run_app(registry=_registry())
     assert captured.get("ok") is True
+
+
+# ── Security screen ──────────────────────────────────────────────────────
+_BAD_SOURCE = "eval(input())\npassword = 'hunter2xyz'\nimport pickle\npickle.loads(x)\n"
+
+
+def _bad_tree(root: Path) -> None:
+    (root / "bad.py").write_text(_BAD_SOURCE, encoding="utf-8")
+    (root / "clean.py").write_text("x = 1\n", encoding="utf-8")
+
+
+def test_state_has_security_orchestrator() -> None:
+    from src.security import SecurityOrchestrator
+
+    state = TuiState(_registry(), EchoBackend())
+    assert isinstance(state.security_orchestrator, SecurityOrchestrator)
+    injected = SecurityOrchestrator(top_limit=3)
+    assert TuiState(_registry(), EchoBackend(), security_orchestrator=injected).security_orchestrator is injected
+
+
+def test_security_screen_empty_state() -> None:
+    app = ZyvoTUI(registry=_registry(), backend=EchoBackend())
+
+    async def scenario() -> None:
+        async with app.run_test() as pilot:
+            app.action_show_security()
+            await pilot.pause()
+            assert isinstance(app.screen, SecurityScreen)
+            assert app.screen._report is None
+            assert app.screen.severity_counts() == {}
+            assert app.screen.visible_findings() == []
+            assert "no scan" in app.screen.summary_text().lower()
+            assert app.screen.export_report() is None  # nothing scanned
+            await pilot.press("escape")
+
+    asyncio.run(scenario())
+
+
+def test_security_screen_scan_filter_and_detail(tmp_path: Path) -> None:
+    _bad_tree(tmp_path)
+    app = ZyvoTUI(registry=_registry(), backend=EchoBackend())
+
+    async def scenario() -> None:
+        async with app.run_test() as pilot:
+            app.action_show_security()
+            await pilot.pause()
+            screen = app.screen
+            assert isinstance(screen, SecurityScreen)
+
+            screen.query_one("#security-target", Input).value = str(tmp_path)
+            report = screen.run_scan()
+            await pilot.pause()
+            assert report is not None and report.findings
+            assert sum(screen.severity_counts().values()) == len(report.findings)
+            assert screen.query_one("#security-findings").row_count == len(report.findings)
+
+            # Text search narrows the visible findings.
+            box = screen.query_one("#security-search", Input)
+            box.value = "eval"
+            await pilot.pause()
+            assert screen.visible_findings()
+            assert all("eval" in f.rule or "eval" in f.message.lower() for f in screen.visible_findings())
+            box.value = "no-such-finding"
+            await pilot.pause()
+            assert screen.visible_findings() == []
+            box.value = ""
+            await pilot.pause()
+
+            # Detail block carries CWE / CVSS / remediation.
+            detail = screen.detail_text(screen.visible_findings()[0])
+            assert "CWE" in detail and "CVSS" in detail and "Remediation" in detail
+
+            # Cycling the profile changes it.
+            before = screen._profile
+            screen.action_cycle_profile()
+            assert screen._profile != before
+
+            await pilot.press("escape")
+
+    asyncio.run(scenario())
+
+
+def test_security_screen_export_report(tmp_path: Path) -> None:
+    _bad_tree(tmp_path)
+    app = ZyvoTUI(registry=_registry(), backend=EchoBackend())
+
+    async def scenario() -> None:
+        async with app.run_test() as pilot:
+            app.action_show_security()
+            await pilot.pause()
+            screen = app.screen
+            assert isinstance(screen, SecurityScreen)
+            screen.run_scan(str(tmp_path))
+            out = screen.export_report(tmp_path / "report.md")
+            assert out is not None and out.exists()
+            assert "# " in out.read_text(encoding="utf-8")
+            await pilot.press("escape")
+
+    asyncio.run(scenario())
+
+
+def test_security_screen_export_default_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A default export must land in the per-user data dir, never in cwd."""
+    _bad_tree(tmp_path)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    app = ZyvoTUI(registry=_registry(), backend=EchoBackend())
+
+    async def scenario() -> None:
+        async with app.run_test() as pilot:
+            app.action_show_security()
+            await pilot.pause()
+            screen = app.screen
+            assert isinstance(screen, SecurityScreen)
+            screen.run_scan(str(tmp_path))
+            out = screen.export_report()
+            assert out is not None and out.exists()
+            assert out.parent == tmp_path / ".local" / "share" / "tyb-zyv-ai" / "reports"
+            await pilot.press("escape")
+
+    asyncio.run(scenario())
+
+
+def test_security_screen_scan_missing_target(tmp_path: Path) -> None:
+    app = ZyvoTUI(registry=_registry(), backend=EchoBackend())
+
+    async def scenario() -> None:
+        async with app.run_test() as pilot:
+            app.action_show_security()
+            await pilot.pause()
+            screen = app.screen
+            assert isinstance(screen, SecurityScreen)
+            assert screen.run_scan(str(tmp_path / "ghost")) is None
+            assert screen._report is None
+            await pilot.press("escape")
+
+    asyncio.run(scenario())
+
+
+def test_security_screen_buttons_dispatch(tmp_path: Path) -> None:
+    _bad_tree(tmp_path)
+    app = ZyvoTUI(registry=_registry(), backend=EchoBackend())
+
+    async def scenario() -> None:
+        async with app.run_test() as pilot:
+            app.action_show_security()
+            await pilot.pause()
+            screen = app.screen
+            assert isinstance(screen, SecurityScreen)
+            screen.query_one("#security-target", Input).value = str(tmp_path)
+            screen.query_one("#btn-run", Button).press()
+            await pilot.pause()
+            assert screen._report is not None
+            screen.query_one("#btn-export", Button).press()
+            await pilot.pause()
+            screen.query_one("#btn-filter", Button).press()
+            await pilot.pause()
+            screen.query_one("#btn-search", Button).press()
+            await pilot.pause()
+            assert screen.query_one("#security-search", Input).has_focus
+            await pilot.press("escape")
+
+    asyncio.run(scenario())
+
+
+def test_ctrl_s_opens_security() -> None:
+    app = ZyvoTUI(registry=_registry(), backend=EchoBackend())
+
+    async def scenario() -> None:
+        async with app.run_test() as pilot:
+            await pilot.press("ctrl+s")
+            await pilot.pause()
+            assert isinstance(app.screen, SecurityScreen)
+            await pilot.press("escape")
+
+    asyncio.run(scenario())
+
+
+def test_security_command_opens_screen() -> None:
+    app = ZyvoTUI(registry=_registry(), backend=EchoBackend())
+
+    async def scenario() -> None:
+        async with app.run_test() as pilot:
+            box = app.screen.query_one("#command", Input)
+            box.value = ":security"
+            await pilot.press("enter")
+            await pilot.pause()
+            assert isinstance(app.screen, SecurityScreen)
+            await pilot.press("escape")
+
+    asyncio.run(scenario())
+
+
+def test_dashboard_has_security_binding() -> None:
+    keys = {binding[0] for binding in DashboardScreen.BINDINGS}
+    assert "s" in keys

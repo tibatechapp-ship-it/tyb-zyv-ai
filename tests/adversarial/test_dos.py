@@ -134,11 +134,14 @@ def test_memory_bomb_is_evicted_from_the_cache() -> None:
 
 @pytest.mark.adversarial
 def test_zip_bomb_bytes_are_treated_as_inert_data() -> None:
-    """A decompression bomb is inert: the framework never auto-unpacks archives.
+    """A decompression bomb is inert: no *unbounded* archive unpacking exists.
 
     Scenario: bytes that expand thousands-fold under zlib. We prove the bomb is
-    real (huge ratio) and that the framework has no eager decompression path: the
-    payload is delivered verbatim as text and ``src/`` imports no archive module.
+    real (huge ratio) and that the framework never unpacks untrusted archives
+    eagerly: the payload is delivered verbatim as text, no streaming archive
+    module (``tarfile``/``lzma``/``bz2``/``gzip``) is imported anywhere in
+    ``src/``, and the single ``zipfile`` reader (the security scanner) refuses an
+    oversized entry from the central directory *before* decompressing it.
     """
     bomb = zlib.compress(b"\x00" * 4_000_000)
     assert len(bomb) < 20_000
@@ -151,8 +154,24 @@ def test_zip_bomb_bytes_are_treated_as_inert_data() -> None:
     assert result.ok
     assert backend.last_user_message() == payload  # passed through, not unpacked
 
-    archive_modules = {"zlib", "gzip", "tarfile", "zipfile", "bz2", "lzma"}
-    assert not (imported_modules(ROOT / "src") & archive_modules)
+    # No unbounded/streaming decompressors may be imported by the framework.
+    streaming_modules = {"tarfile", "lzma", "bz2", "gzip"}
+    assert not (imported_modules(ROOT / "src") & streaming_modules)
+
+    # Exactly one module may read ZIP archives — the bounded security scanner.
+    importers = sorted(
+        path
+        for path in (ROOT / "src").rglob("*.py")
+        if re.search(r"^\s*import zipfile\b", path.read_text(encoding="utf-8"), re.MULTILINE)
+    )
+    assert [path.name for path in importers] == ["orchestrator.py"]
+
+    # And it MUST check the declared (uncompressed) size before reading the entry,
+    # so a bomb is skipped without ever being decompressed into memory.
+    source = importers[0].read_text(encoding="utf-8")
+    guard = source.index("info.file_size > self._MAX_ENTRY_BYTES")
+    read = source.index("archive.read(info)")
+    assert guard < read, "the size guard must run BEFORE archive.read (bomb risk)"
 
 
 @pytest.mark.adversarial

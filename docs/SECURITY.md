@@ -135,3 +135,55 @@ Exit code is `0` when the worst verdict is below the gate, `1` otherwise — so
 
 Tests: `tests/test_security_scanner.py` (agents, orchestrator, classifier,
 reporter) and `tests/test_security_cli.py` (the CLI).
+
+---
+
+## The report front door (Phase 10)
+
+`SecurityOrchestrator` is the one object the TUI (and any caller) holds: pick a
+**profile**, scan a file/tree/archive, then classify and score. It ties the bare
+`SecurityScanner` together with three small helpers.
+
+```python
+from src.security import SecurityOrchestrator
+
+orch = SecurityOrchestrator()
+report = orch.scan("app.apk", profile="full")   # SecurityReport
+print(report.score.value, report.score.grade)    # 0–100, A–F
+print(orch.render_markdown(report, title="Audit"))
+```
+
+- **Profiles** (`src/security/profiles.py`) — `PROFILES` / `PROFILE_ORDER` /
+  `get_profile(name)`. A profile selects which of the eight agents run, so you
+  can scope a scan to `secrets` only or run `full`. Unknown name → `KeyError`.
+- **Scoring** (`src/security/scoring.py`) — `compute_score(counts)` subtracts a
+  per-severity penalty from 100 (floored at 0) and `grade_for(score)` bands it
+  A–F. `SecurityScore.from_counts(...)` is the one-liner used internally.
+- **Rule metadata** (`src/security/metadata.py`) — `RULE_METADATA` /
+  `metadata_for(rule)` give each rule its CWE, CVSS and remediation text (shown
+  in the TUI detail pane); an unknown rule falls back to `DEFAULT_META`.
+
+### Archive scanning is bomb-safe
+
+`scan()` also accepts an `.apk`/`.zip` file: it walks the UTF-8 entries inside.
+Reading untrusted archives is the classic decompression-bomb trap, so the reader
+is bounded — **every guard runs before anything is decompressed**:
+
+1. an entry's *declared* uncompressed size is read from the ZIP central
+   directory and the entry is skipped if it exceeds `_MAX_ENTRY_BYTES` (2 MB)
+   — the bomb never reaches `archive.read`;
+2. at most `_MAX_ENTRIES` (5 000) entries are inspected;
+3. the total decompressed bytes are capped at `_MAX_TOTAL_BYTES` (20 MB);
+4. a corrupt, truncated or password-protected entry is skipped, never fatal.
+
+This invariant is enforced by the adversarial DoS suite
+(`test_zip_bomb_bytes_are_treated_as_inert_data`) plus two behavioural
+regression tests in `tests/test_security_orchestrator.py`.
+
+### In the TUI
+
+Press `ctrl+s` (or type `:security`) to open the **Security** screen. Enter a
+target, press `r` to scan, cycle profiles with `f`, search the findings and read
+each one's CWE/CVSS/remediation below the table. `e` exports a markdown report —
+by default to `~/.local/share/tyb-zyv-ai/reports/`, never into the working tree.
+

@@ -51,6 +51,7 @@ Screen {
 #monitor-modal,
 #logs-modal,
 #lessons-modal,
+#security-modal,
 #help-modal {
     width: 80%;
     height: auto;
@@ -58,4 +59,26 @@ Screen {
     border: thick $primary;
     background: $surface;
     padding: 1 2;
+}
+
+#security-buttons {
+    height: auto;
+    margin: 1 0;
+}
+
+#security-buttons Button {
+    margin-right: 1;
+}
+
+#security-summary {
+    padding: 1 0;
+}
+
+#security-findings {
+    height: 12;
+    border: round $accent;
+}
+
+#security-detail {
+    padding-top: 1;
 }

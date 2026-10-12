@@ -97,6 +97,30 @@ python -c "from src.core.backend import EchoBackend; from src.tui.app import run
 
 The `TUI`'s subtitle says "20-agent console" — because now it is one.
 
+#### Tools actually run (safely)
+
+An agent's `tools`/`permissions` are not just labels. `BaseAgent.run()` is a
+single completion, but `BaseAgent.run_with_tools()` runs a bounded **ReAct loop**
+over a plain-text protocol: the model emits `<tool-call name="read" args='{…}'/>`
+markers, the framework executes them and feeds the results back until the model
+answers without a call (or a step budget runs out).
+
+```python
+from src.agents import all_agents
+from src.core.backend import EchoBackend
+
+coder = all_agents(EchoBackend())["coder"]
+run = coder.run_with_tools("read answer.txt and tell me the number", root=".")
+print(run.result.output, run.steps, run.outcomes)
+```
+
+Only **read-only** tools run in-framework — `read`, `list`, `grep`, each confined
+to a workspace root (no `../` escapes, no absolute paths outside it) and gated by
+the agent's own `tools`. Anything that mutates the system or runs a shell
+(`write`/`edit`/`bash`) is **never** executed here: those run inside the ZYVO
+server, behind its permission gate. The split keeps the phone safe while still
+letting agents *do* things.
+
 ### `src/security` — offline static security scanner
 A deterministic, dependency-free scanner for source trees. Eight agents (
 secrets · injection · traversal · crypto · deserialization · network ·
@@ -108,6 +132,12 @@ python -m src.security src                 # markdown report
 python -m src.security . --json            # machine-readable
 python -m src.security . --fail-on high    # exit 1 on HIGH+ (pre-commit / CI)
 ```
+
+`SecurityOrchestrator` wraps it with **profiles** (scan with all eight agents or
+just `secrets`), a 0–100 **score** with an A–F grade, per-rule CWE/CVSS/
+remediation metadata, and safe `.apk`/`.zip` scanning (bomb-proof: entry sizes
+are checked before decompression). The same engine is in the TUI — press `ctrl+s`
+(or `:security`) to scan, filter and export a report.
 
 Full guide → [`docs/SECURITY.md`](docs/SECURITY.md).
 
@@ -223,6 +253,7 @@ zyvo-voice --text "git status in ~/myapp" --no-speak
 | [`docs/SECURITY.md`](docs/SECURITY.md) | The Phase 9 static security scanner — agents, verdict ladder, CLI. |
 | [`docs/SERVER_RELIABILITY.md`](docs/SERVER_RELIABILITY.md) | The `src/core` resilience layer: retries, cache, queue, fallback, JSON logging, watchdog + heartbeat. |
 | [`docs/TESTING.md`](docs/TESTING.md) | Running the test suite, coverage, fakes, and how CI is wired. |
+| [`docs/PROJECT_REVIEW.md`](docs/PROJECT_REVIEW.md) | Full evaluation: strengths, open-source comparison, weaknesses and the fix ledger. |
 | [`docs/FAQ.md`](docs/FAQ.md) | "Service not found", no audio, mic not working, TTS language, and more. |
 
 ---

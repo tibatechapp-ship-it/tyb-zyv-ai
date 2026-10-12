@@ -58,6 +58,13 @@ bonus fuzz, chaos. Run: `python -m pytest tests/adversarial/ -v`.
 - `src/tools/` — schemas.py (ToolParameter/ToolSchema frozen tool descriptions;
   to_json_schema/to_openai/to_anthropic renderers; validate_arguments incl.
   required/type/enum/unknown keys; ToolRegistry thread-safe catalogue).
+  executor.py — the REAL execution layer (Phase 10): `parse_tool_calls` (tolerant
+  `<tool-call name=… args='{…}'/>` parser), `LocalToolExecutor` (read-only tools
+  `read`/`list`/`grep`, every path confined to a workspace root — `../`+absolute
+  escapes refused; output clamped; never raises), `ToolCall`/`ToolOutcome`/
+  `ToolRun`. `write`/`edit`/`bash` are NOT executed here (server-side only).
+  `BaseAgent.run_with_tools(task, root=, max_steps=5)` runs a bounded ReAct loop
+  (generate → execute → feed back) while `run()` stays a single call. 100% cov.
 - `src/agents/` — base.py (BaseAgent: metadata + run loop), sub_agent.py
   (SubAgent tool-restricted child + SubAgentRunner: tools ⊆ parent's (else
   ValueError), max_depth guard, optional ModelRouter for child model),
@@ -267,6 +274,33 @@ bonus fuzz, chaos. Run: `python -m pytest tests/adversarial/ -v`.
   1077 tests, 99% cov (security/* 100%).
 - 2026-10-12: released **v3.0.0** (continual learning Phases 4-6 + model router/
   tools/sub-agents Phase 7 + context manager Phase 8 + security scanner Phase 9).
+- 2026-10-12: **project review + fixes** (`docs/PROJECT_REVIEW.md`, the report):
+  - **Fixed a real zip-bomb OOM bug** in `SecurityOrchestrator._scan_archive`
+    (uncommitted Phase-10 work): it read the entry BEFORE checking size. Now the
+    declared uncompressed size is checked from the ZIP central directory *before*
+    `archive.read`, plus `_MAX_ENTRIES` (5000) and `_MAX_TOTAL_BYTES` (20 MB) caps
+    and per-entry error handling. This bug had broken
+    `tests/adversarial/test_dos.py::test_zip_bomb_bytes_are_treated_as_inert_data`
+    (suite was failing 1/1116). Re-scoped that invariant to: no streaming
+    decompressor imported, exactly ONE module imports `zipfile`, and a source
+    assertion that the size guard precedes `archive.read` (so removing it fails).
+    Regression tests: `test_zip_bomb_entry_is_skipped_without_decompression`,
+    `test_archive_entry_count_is_capped`.
+  - **Built the real tool-execution layer** (`src/tools/executor.py`) — the biggest
+    gap vs LangGraph/CrewAI/smolagents was that tools/permissions were declarative
+    only (agents executed nothing). `run_with_tools` is a bounded ReAct loop; only
+    read-only tools run in-framework, confined to a root; `run()` unchanged.
+  - TUI security export now defaults to `~/.local/share/tyb-zyv-ai/reports/`
+    (never the working tree); `security-report-*.md` gitignored; 3 stray root
+    files deleted.
+  - Docs: README "Tools actually run" + security front-door sections; SECURITY.md
+    Phase-10 section; new PROJECT_REVIEW.md.
+  - Verified green: ruff · mypy · check_annotations · 1157 tests @ 98.90% ·
+    adversarial 92/92 HELD. `src/tools/executor.py` 100% cov.
+- 2026-10-12: released **v3.1.0** (Phase 10 security TUI screen + zip-bomb fix +
+  real tool executor `src/tools/executor.py` + reviews/docs). Version bumped in
+  both pyproject.toml and src/__init__.py. 1162 tests @ 99.09%.
+
 - Lesson: pytest `python_classes=Test*` collects agent class `TesterAgent`/alias
   `Tester` → PytestCollectionWarning. Never import `TesterAgent` under a
   Test-prefixed name in tests; use `AGENT_CLASSES` or alias it (e.g. `as QA`).

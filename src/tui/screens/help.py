@@ -12,10 +12,10 @@ __all__ = ["HelpScreen"]
 
 _HELP = """[b]Keys[/b]
   a  agents      t  tasks      m  monitor      l  logs
-  ctrl+l  lessons    ?  help    q  quit
+  ctrl+l  lessons    ctrl+s  security    ?  help    q  quit
 
 [b]Commands[/b] (type in the input bar)
-  :agents   :tasks   :monitor   :logs   :lessons   :help   :quit
+  :agents   :tasks   :monitor   :logs   :lessons   :security   :help   :quit
 
 [b]Running an agent[/b]
   @coder  write a fibonacci function     → run one agent

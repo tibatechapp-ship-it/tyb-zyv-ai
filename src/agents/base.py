@@ -11,11 +11,16 @@ from __future__ import annotations
 import time
 from abc import ABC
 from collections.abc import Sequence
+from pathlib import Path
+from typing import TYPE_CHECKING
 
 from src.agents.metrics import AgentMetrics
 from src.agents.state import AgentState
 from src.core.backend import LLMBackend
 from src.core.types import AgentResult, Message
+
+if TYPE_CHECKING:  # pragma: no cover - typing only, avoids an import cycle
+    from src.tools.executor import ToolRun
 
 __all__ = ["BaseAgent"]
 
@@ -110,6 +115,36 @@ class BaseAgent(ABC):
     def run_many(self, tasks: Sequence[str]) -> list[AgentResult]:
         """Run several tasks sequentially on this agent."""
         return [self.run(task) for task in tasks]
+
+    def run_with_tools(
+        self,
+        task: str,
+        *,
+        context: str = "",
+        lessons: str = "",
+        root: str | Path | None = None,
+        max_steps: int = 5,
+        max_calls_per_step: int = 5,
+    ) -> ToolRun:
+        """Run ``task`` with real tool execution (a bounded ReAct loop).
+
+        Unlike :meth:`run` (a single backend call), this parses ``<tool-call>``
+        markers out of the model's answer, runs the *safe* ones against ``root``
+        with :class:`~src.tools.executor.LocalToolExecutor`, and feeds the results
+        back until the model answers without a call. Only read-only tools are
+        executable in-framework; ``write``/``edit``/``bash`` stay server-side.
+        """
+        from src.tools.executor import LocalToolExecutor
+
+        executor = LocalToolExecutor(root=root)
+        return executor.run(
+            self,
+            task,
+            context=context,
+            lessons=lessons,
+            max_steps=max_steps,
+            max_calls_per_step=max_calls_per_step,
+        )
 
     def info(self) -> dict[str, object]:
         """Static metadata + live state/metrics, for the TUI."""

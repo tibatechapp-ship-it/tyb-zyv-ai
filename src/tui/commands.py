@@ -13,7 +13,9 @@ from dataclasses import dataclass
 
 __all__ = ["ParsedCommand", "parse_command", "KNOWN_COMMANDS"]
 
-KNOWN_COMMANDS = frozenset({"agents", "tasks", "monitor", "logs", "lessons", "help", "quit"})
+KNOWN_COMMANDS = frozenset(
+    {"agents", "tasks", "monitor", "logs", "lessons", "security", "help", "quit"}
+)
 
 
 @dataclass(slots=True)

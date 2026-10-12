@@ -15,6 +15,7 @@ from src.tui.screens.help import HelpScreen
 from src.tui.screens.lessons import LessonsScreen
 from src.tui.screens.logs import LogsScreen
 from src.tui.screens.monitor import MonitorScreen
+from src.tui.screens.security import SecurityScreen
 from src.tui.screens.tasks import TasksScreen
 from src.tui.state import TuiState
 
@@ -30,6 +31,7 @@ class ZyvoTUI(App[None]):
     BINDINGS = [
         ("ctrl+c", "quit", "Quit"),
         ("ctrl+l", "show_lessons", "Lessons"),
+        ("ctrl+s", "show_security", "Security"),
     ]
 
     def __init__(
@@ -60,6 +62,9 @@ class ZyvoTUI(App[None]):
 
     def action_show_lessons(self) -> None:
         self.push_screen(LessonsScreen())
+
+    def action_show_security(self) -> None:
+        self.push_screen(SecurityScreen())
 
     def action_show_help(self) -> None:
         self.push_screen(HelpScreen())

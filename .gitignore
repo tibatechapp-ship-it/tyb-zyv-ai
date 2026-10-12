@@ -49,6 +49,9 @@ voice-out/
 *.pid
 zyvo-*-server.log
 
+# ─── Generated security reports (kept in ~/.local/share/tyb-zyv-ai/reports) ─
+security-report-*.md
+
 # ─── OS / editor junk ──────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
