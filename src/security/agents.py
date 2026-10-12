@@ -9,7 +9,6 @@ regex that matches yields one :class:`~src.security.types.Finding` per line
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
 from pathlib import Path
 from typing import ClassVar
 
@@ -28,8 +27,10 @@ class SecurityAgent:
     #: ``{rule}`` which is replaced by the rule name.
     patterns: ClassVar[tuple[Pattern, ...]] = ()
     reporter: ClassVar[str] = "generic"
-    #: Only run this agent on files whose name passes this predicate.
-    path_filter: ClassVar[Callable[[Path], bool]] = staticmethod(lambda path: True)
+
+    def path_filter(self, path: Path) -> bool:
+        """Whether this agent cares about the file at ``path`` (default: all)."""
+        return True
 
     def scan(self, text: str, path: str) -> list[Finding]:
         """Run every pattern over ``text`` and return findings with line numbers."""
@@ -224,10 +225,15 @@ class _NetworkAgent(SecurityAgent):
 class _DependencyAgent(SecurityAgent):
     name = "dependency"
     description = "Unpinned or unbounded dependencies."
-    path_filter = staticmethod(
-        lambda path: path.name.startswith("requirements")
-        or path.name in ("pyproject.toml", "Pipfile", "Pipfile.lock", "poetry.lock")
-    )
+
+    def path_filter(self, path: Path) -> bool:
+        return path.name.startswith("requirements") or path.name in (
+            "pyproject.toml",
+            "Pipfile",
+            "Pipfile.lock",
+            "poetry.lock",
+        )
+
     patterns: ClassVar[tuple[Pattern, ...]] = (
         (
             re.compile(

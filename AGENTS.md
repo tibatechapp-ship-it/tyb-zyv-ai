@@ -154,6 +154,22 @@ bonus fuzz, chaos. Run: `python -m pytest tests/adversarial/ -v`.
   `tests/test_memory_stores.py`, `tests/test_memory_manager.py`,
   `tests/test_embeddings.py`. DB path: `$ZYVO_MEMORY_DB` else
   `~/.local/share/tyb-zyv-ai/memory.db`; `":memory:"` for tests.
+- `src/security/` — Phase 9 offline static security scanner (stdlib only, no
+  execution, no network). types.py (`Severity`/`RiskLevel`/`Finding` +
+  `SEVERITY_WEIGHTS`), agents.py (`SecurityAgent` base: `name`/`description`/
+  `patterns`/overridable `path_filter(Path)->bool`; 8 agents — `secrets`,
+  `injection`, `traversal`, `crypto`, `deserialization`, `network`,
+  `dependency` (manifest-only via path_filter), `pii`; `SECURITY_AGENTS`),
+  orchestrator.py (`SecurityScanner.scan_text`/`scan_file`(skips binary +
+  >max_bytes)/`scan_path`(tree walk, `DEFAULT_EXCLUDE`), `ScanResult`),
+  classifier.py (`FindingClassifier` dedup by (agent,rule,path,line,message) +
+  score + `_verdict_for` ladder: any critical→critical; any high or ≥3 medium→
+  high; any medium or ≥5 low→medium; any low/info→low; else clean), reporter.py
+  (`SecurityReporter.render_markdown`/`render_json`/`render_summary`),
+  `__main__.py` CLI (`python -m src.security PATH [--json] [--top N]
+  [--exclude NAME] [--fail-on LEVEL]`; exit 1 at/above the gate, default high).
+  Docs: `docs/SECURITY.md`. Tests: `tests/test_security_scanner.py`,
+  `tests/test_security_cli.py`.
 
 ## Conventions
 - Every function fully type-annotated (CI enforces via check_annotations.py).
@@ -242,6 +258,13 @@ bonus fuzz, chaos. Run: `python -m pytest tests/adversarial/ -v`.
   so the history is at/under the ratio when add() returns. LESSON: eviction
   loops + digest-in-the-same-list designs get index/marker bugs; a separate
   digest slot is clean and testable. 1053 tests, 99% cov (context_manager 100%).
+- 2026-10-12: Phase 9 — offline static security scanner (`src/security/`):
+  8 regex agents + orchestrator + dedup/score/verdict classifier + markdown/JSON
+  reporter, plus a `python -m src.security` CLI that fails the build at/above
+  `--fail-on` (default high). Fully stdlib, deterministic, no execution/network.
+  `SecurityAgent.path_filter` is a real overridable METHOD (was a `staticmethod`
+  lambda that tripped mypy: "Invalid self argument"). Docs: `docs/SECURITY.md`.
+  1077 tests, 99% cov (security/* 100%).
 - Lesson: pytest `python_classes=Test*` collects agent class `TesterAgent`/alias
   `Tester` → PytestCollectionWarning. Never import `TesterAgent` under a
   Test-prefixed name in tests; use `AGENT_CLASSES` or alias it (e.g. `as QA`).

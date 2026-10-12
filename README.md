@@ -97,6 +97,20 @@ python -c "from src.core.backend import EchoBackend; from src.tui.app import run
 
 The `TUI`'s subtitle says "20-agent console" — because now it is one.
 
+### `src/security` — offline static security scanner
+A deterministic, dependency-free scanner for source trees. Eight agents (
+secrets · injection · traversal · crypto · deserialization · network ·
+dependency · pii) find risky shapes, a classifier judges the risk, and a
+reporter renders markdown/JSON. Nothing is executed; nothing leaves the device.
+
+```bash
+python -m src.security src                 # markdown report
+python -m src.security . --json            # machine-readable
+python -m src.security . --fail-on high    # exit 1 on HIGH+ (pre-commit / CI)
+```
+
+Full guide → [`docs/SECURITY.md`](docs/SECURITY.md).
+
 ---
 
 ## Requirements
@@ -206,6 +220,7 @@ zyvo-voice --text "git status in ~/myapp" --no-speak
 | [`docs/INSTALLATION.md`](docs/INSTALLATION.md) | Every package, app, token and permission needed — start to finish. |
 | [`docs/USAGE.md`](docs/USAGE.md) | All CLI flags, control words, env vars, and recipes. |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | How the pieces fit: PTY server, SSE stream, permission watchdog, retries. |
+| [`docs/SECURITY.md`](docs/SECURITY.md) | The Phase 9 static security scanner — agents, verdict ladder, CLI. |
 | [`docs/SERVER_RELIABILITY.md`](docs/SERVER_RELIABILITY.md) | The `src/core` resilience layer: retries, cache, queue, fallback, JSON logging, watchdog + heartbeat. |
 | [`docs/TESTING.md`](docs/TESTING.md) | Running the test suite, coverage, fakes, and how CI is wired. |
 | [`docs/FAQ.md`](docs/FAQ.md) | "Service not found", no audio, mic not working, TTS language, and more. |

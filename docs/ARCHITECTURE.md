@@ -242,6 +242,48 @@ prompt = ctx.history()               # [digest] + surviving turns
 
 ---
 
+## Security scanner (Phase 9)
+
+`src/security/` is an **offline, deterministic, static** scanner for source
+trees — no network, no execution, standard library only. It mirrors the agent
+idea: eight specialised `SecurityAgent`s each own one category of regex rules,
+and an orchestrator drives them.
+
+```
+SecurityScanner.scan_path(dir)
+      │  walk tree (DEFAULT_EXCLUDE skips .git, venvs, node_modules, …)
+      ▼
+  per file → per agent → SecurityAgent.scan(text, path) → [Finding, …]
+      │
+      ▼
+  FindingClassifier.classify(findings)  → dedup + score → Classification(verdict)
+      │
+      ▼
+  SecurityReporter.render_markdown / render_json / render_summary
+```
+
+- **`types.py`** — `Severity`, `RiskLevel`, `Finding` (agent/rule/path/line/
+  severity/message/snippet) and the severity→weight table.
+- **`agents.py`** — `SecurityAgent` base (a `name`, `description`, `patterns`,
+  optional `path_filter`) plus the eight: `secrets`, `injection`, `traversal`,
+  `crypto`, `deserialization`, `network`, `dependency`, `pii`.
+- **`orchestrator.py`** — `SecurityScanner` (`scan_text` / `scan_file` /
+  `scan_path`), `ScanResult`, `DEFAULT_EXCLUDE`.
+- **`classifier.py`** — `FindingClassifier`, `Classification` and the verdict
+  ladder (`critical` > `high` > `medium` > `low` > `clean`).
+- **`reporter.py`** — `SecurityReporter` markdown / JSON / summary renderers.
+- **`__main__.py`** — the `python -m src.security PATH [--json] [--fail-on L]`
+  CLI; exits non-zero at or above the gate (`--fail-on`, default `high`).
+
+```bash
+python -m src.security src --fail-on high      # fails the build on HIGH+
+```
+
+Full guide → [SECURITY.md](SECURITY.md). Tests → `tests/test_security_scanner.py`
++ `tests/test_security_cli.py`.
+
+---
+
 ## Extending it
 
 - **New input channel?** (Slack, Matrix, a web UI) — you only need to produce a

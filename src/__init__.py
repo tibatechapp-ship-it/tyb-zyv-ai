@@ -12,6 +12,7 @@ Import layout::
     src.patterns   → Supervisor, Pipeline, Fanout, Delegation, Blackboard
     src.memory     → episodic/semantic/procedural/emotional stores + manager
     src.learning   → ExperienceCollector (what agents did + how it ended)
+    src.security   → offline static security scanner (agents + classifier)
     src.tui        → terminal UI (Textual app + screens + widgets)
 """
 

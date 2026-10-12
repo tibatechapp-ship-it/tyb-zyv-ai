@@ -6,26 +6,36 @@ real clock involved — each test patches the exact seam the code touches.
 
 ```
 tests/
-├── conftest.py                 # importlib module loader + fakes (FakePopen/FakeResponse)
-├── deep_helpers.py             # mock LLM backends for the deep agent suites
-├── test_zyvo_telegram.py       # unit tests for the Telegram bot
-├── test_zyvo_voice.py          # unit tests for the voice assistant
-├── test_src_core.py            # types, backend, zyvo client, resilience, watchdog
-├── test_src_agents.py          # BaseAgent, registry, state, metrics, communication
-├── test_src_patterns.py        # supervisor, pipeline, fanout, delegation, blackboard
-├── test_src_tui.py             # Textual app / screens / widgets
-├── test_agents_20.py           # the 20 built-in agents' contract
-├── test_phase1_context.py      # deep: personas, bilingual contract, context handling
-├── test_phase2_collab.py       # deep: multi-agent collaboration patterns
-├── test_phase3_resilience.py   # deep: retries, fallback, queue, watchdog
-├── test_phase4_security.py     # deep: injection/traversal inert, secrets, permissions
-├── test_phase5_performance.py  # deep: load (100 tasks), memory, latency, benchmarks
-├── test_snapshot_contract.py   # golden catalog of the 20-agent public contract
-└── __snapshots__/              # syrupy golden files
+├── conftest.py                     # importlib module loader + fakes (FakePopen/FakeResponse)
+├── deep_helpers.py                 # mock LLM backends for the deep agent suites
+├── test_zyvo_telegram.py           # unit tests for the Telegram bot
+├── test_zyvo_voice.py              # unit tests for the voice assistant
+├── test_src_core.py                # types, backend, zyvo client, resilience, watchdog
+├── test_src_agents.py              # BaseAgent, registry, state, metrics, communication
+├── test_src_patterns.py            # supervisor, pipeline, fanout, delegation, blackboard
+├── test_src_tui.py                 # Textual app / screens / widgets
+├── test_agents_20.py               # the 20 built-in agents' contract
+├── test_concurrency.py             # thread-safety (races, lock ordering, benchmark)
+├── test_core_model_router.py       # ModelRouter (Phase 7)
+├── test_core_context_manager.py    # ContextManager token accounting + compaction (Phase 8)
+├── test_tools_schemas.py           # ToolSchema renderers + argument validation (Phase 7)
+├── test_sub_agent.py               # SubAgentRunner tool-restriction + depth guard (Phase 7)
+├── test_memory_*.py                # memory stores, manager, embeddings, tone (Phases 1-6)
+├── test_learning_*.py              # experience collector, lessons, manager, anti-forgetting
+├── test_security_scanner.py        # the 8 security agents + orchestrator/classifier/reporter
+├── test_security_cli.py            # the `python -m src.security` command line
+├── test_phase1_context.py          # deep: personas, bilingual contract, context handling
+├── test_phase2_collab.py           # deep: multi-agent collaboration patterns
+├── test_phase3_resilience.py       # deep: retries, fallback, queue, watchdog
+├── test_phase4_security.py         # deep: injection/traversal inert, secrets, permissions
+├── test_phase5_performance.py      # deep: load (100 tasks), memory, latency, benchmarks
+├── test_snapshot_contract.py       # golden catalog of the 20-agent public contract
+├── adversarial/                    # red-team suite (92 vectors, 8 categories)
+└── __snapshots__/                  # syrupy golden files
 ```
 
-As of the last run: **505 tests, 98 % coverage** (branch coverage; the
-`src/agents/` layer sits at 100 %).
+As of the last run: **1077 tests, 99 % coverage** (branch coverage; the
+`src/agents/`, `src/security/` and `src/tools/` layers sit at 100 %).
 
 ---
 
