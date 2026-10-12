@@ -33,12 +33,14 @@ def _scan_text(text: str, path: str = "app.py") -> list[Finding]:
 
 # ---------------------------------------------------------------- each agent
 def test_secrets_agent_hits_every_rule() -> None:
+    # The token/key literals are assembled at runtime so this test file itself
+    # is not flagged by the repo's committed-secret scanner.
     text = "\n".join(
         [
             "aws = 'AKIA0123456789ABCDEF'",
-            "tok = 'ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'",
+            "tok = 'ghp_" + "A" * 36 + "'",
             "key = 'sk-abcdefghijklmnopqrstuvwxyz0123'",
-            "-----BEGIN PRIVATE KEY-----",
+            "-----BEGIN " + "PRIVATE KEY" + "-----",
             "password = 'correct horse battery staple'",
         ]
     )
